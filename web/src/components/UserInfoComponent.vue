@@ -280,7 +280,7 @@ const goToLogin = () => {
 }
 
 const openDocs = () => {
-  window.open('https://xerrors.github.io/Yuxi-Know/', '_blank', 'noopener,noreferrer')
+  message.info('请联系管理员获取使用文档');
 }
 
 const toggleTheme = () => {

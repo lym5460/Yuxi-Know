@@ -15,7 +15,7 @@ class GraphQueryConfig:
     keyword: str = ""
     kb_id: str | None = None
     kgdb_name: str | None = None
-    max_nodes: int = 50
+    max_nodes: int | None = None  # None 表示不限制节点数量
     max_depth: int = 2
     hops: int = 2
     threshold: float = 0.9
@@ -82,11 +82,17 @@ class GraphAdapter(ABC):
         config_dict = self.config.copy()
         config_dict.update(kwargs)
 
+        # max_nodes 处理：如果明确传入 None，保持 None；否则使用默认值
+        max_nodes = config_dict.get("max_nodes")
+        if max_nodes is None and "max_nodes" not in config_dict:
+            # 如果没有传入 max_nodes，尝试从 limit 获取，否则保持 None
+            max_nodes = config_dict.get("limit")
+
         return GraphQueryConfig(
             keyword=config_dict.get("keyword", ""),
             kb_id=config_dict.get("kb_id") or self.config.get("kb_id"),
             kgdb_name=config_dict.get("kgdb_name") or self.config.get("kgdb_name", "neo4j"),
-            max_nodes=config_dict.get("max_nodes", config_dict.get("limit", 50)),
+            max_nodes=max_nodes,
             max_depth=config_dict.get("max_depth", 2),
             hops=config_dict.get("hops", 2),
             threshold=config_dict.get("threshold", 0.9),

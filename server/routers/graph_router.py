@@ -118,7 +118,7 @@ async def get_subgraph(
     db_id: str = Query(..., description="知识图谱ID"),
     node_label: str = Query("*", description="节点标签或查询关键词"),
     max_depth: int = Query(2, description="最大深度", ge=1, le=5),
-    max_nodes: int = Query(100, description="最大节点数", ge=1, le=1000),
+    max_nodes: int | None = Query(None, description="最大节点数（None 表示不限制）", ge=1),
     current_user: User = Depends(get_admin_user),
 ):
     """
@@ -128,10 +128,10 @@ async def get_subgraph(
         db_id: 图谱ID (LightRAG DB ID 或 "neo4j")
         node_label: 查询关键词或标签
         max_depth: 扩展深度
-        max_nodes: 返回最大节点数
+        max_nodes: 返回最大节点数（None 表示返回所有节点）
     """
     try:
-        logger.info(f"Querying subgraph - db_id: {db_id}, label: {node_label}")
+        logger.info(f"Querying subgraph - db_id: {db_id}, label: {node_label}, max_nodes: {max_nodes}")
 
         adapter = await _get_graph_adapter(db_id)
 
@@ -139,8 +139,11 @@ async def get_subgraph(
         query_kwargs = {
             "keyword": node_label,
             "max_depth": max_depth,
-            "max_nodes": max_nodes,
         }
+
+        # 仅当 max_nodes 有值时才添加限制
+        if max_nodes is not None:
+            query_kwargs["max_nodes"] = max_nodes
 
         result_data = await adapter.query_nodes(**query_kwargs)
 

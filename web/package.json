@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
+    "3d-force-graph": "^1.73.5",
     "@antv/g6": "^5.0.51",
     "@sigma/edge-curve": "^3.1.0",
     "@sigma/node-border": "^3.0.0",
@@ -34,6 +35,8 @@
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "sigma": "^3.0.2",
+    "three": "~0.170.0",
+    "three-spritetext": "^1.10.0",
     "vue": "^3.5.29",
     "vue-router": "^4.6.4"
   },
