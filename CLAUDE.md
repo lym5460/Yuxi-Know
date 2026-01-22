@@ -1,4 +1,7 @@
 
+# 通用规则
+始终使用中文与我交流，包括思考过程
+
 # 项目目录结构 (Project Overview)
 
 Yuxi-Know 是一个基于大模型的智能知识库与知识图谱智能体开发平台，融合了 RAG 技术与知识图谱技术，基于 LangGraph v1 + Vue.js + FastAPI + LightRAG 架构构建。项目完全通过 Docker Compose 进行管理，支持热重载开发。

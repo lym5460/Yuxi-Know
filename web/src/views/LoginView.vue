@@ -212,21 +212,13 @@
       </div>
     </main>
 
-    <!-- 页面底部：版权信息等 -->
-    <footer class="page-footer">
-      <div class="footer-links">
-        <a href="https://github.com/xerrors" target="_blank">联系我们</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/xerrors/Yuxi-Know" target="_blank">使用帮助</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/xerrors/Yuxi-Know/blob/main/LICENSE" target="_blank"
-          >隐私政策</a
-        >
+          <!-- 页脚 -->
+          <div class="login-footer">
+            <span>© 上海曼恒数字技术股份有限公司</span>
+          </div>
+        </div>
       </div>
-      <div class="copyright">
-        &copy; {{ new Date().getFullYear() }} {{ brandName }}. All Rights Reserved.
-      </div>
-    </footer>
+    </div>
   </div>
 </template>
 

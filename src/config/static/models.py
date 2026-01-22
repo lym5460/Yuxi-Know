@@ -207,6 +207,13 @@ DEFAULT_EMBED_MODELS: dict[str, EmbedModelInfo] = {
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
         api_key="DASHSCOPE_API_KEY",
     ),
+    "xinference/bge-m3": EmbedModelInfo(
+        model_id="xinference/bge-m3",
+        name="bge-m3",
+        dimension=1024,
+        base_url="http://host.docker.internal:9997/v1/embeddings",
+        api_key="no_api_key",
+    ),
 }
 
 
@@ -238,6 +245,11 @@ DEFAULT_RERANKERS: dict[str, RerankerInfo] = {
     "vllm/BAAI/bge-reranker-v2-m3": RerankerInfo(
         name="BAAI/bge-reranker-v2-m3",
         base_url="http://localhost:8000/v1/rerank",
+        api_key="no_api_key",
+    ),
+    "xinference/bge-reranker-v2-m3": RerankerInfo(
+        name="bge-reranker-v2-m3",
+        base_url="http://host.docker.internal:9997/v1/rerank",
         api_key="no_api_key",
     ),
 }

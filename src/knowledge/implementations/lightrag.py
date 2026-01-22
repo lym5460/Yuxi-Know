@@ -115,12 +115,22 @@ class LightRagKB(KnowledgeBase):
         working_dir = os.path.join(self.work_dir, db_id)
         os.makedirs(working_dir, exist_ok=True)
 
+        # 获取 rerank 模型配置
+        rerank_func = None
+        if config.enable_reranker and config.reranker:
+            try:
+                rerank_func = self._get_rerank_func(config.reranker)
+                logger.info(f"Rerank model enabled for {db_id}: {config.reranker}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize rerank model {config.reranker}: {e}")
+
         # 创建 LightRAG 实例
         rag = LightRAG(
             working_dir=working_dir,
             workspace=db_id,
             llm_model_func=self._get_llm_func(llm_info),
             embedding_func=self._get_embedding_func(embed_info),
+            rerank_model_func=rerank_func,
             vector_storage="MilvusVectorDBStorage",
             kv_storage="JsonKVStorage",
             graph_storage="Neo4JStorage",
@@ -231,6 +241,42 @@ class LightRagKB(KnowledgeBase):
                 base_url=config_dict["base_url"].replace("/embeddings", ""),
             ),
         )
+
+    def _get_rerank_func(self, rerank_model_id: str):
+        """获取 rerank 函数"""
+        from src.models.rerank import get_reranker
+
+        reranker = get_reranker(rerank_model_id)
+
+        async def rerank_func(query: str, documents: list[str], top_n: int = None) -> list[dict]:
+            """
+            LightRAG 期望的 rerank 函数签名
+            返回格式: [{"index": 0, "relevance_score": 0.95}, ...]
+
+            Args:
+                query: 查询文本
+                documents: 文档列表
+                top_n: 返回前 N 个结果（可选，LightRAG 会传递此参数）
+            """
+            try:
+                scores = await reranker.acompute_score([query, documents], normalize=True)
+                results = [{"index": i, "relevance_score": float(score)} for i, score in enumerate(scores)]
+
+                # 如果指定了 top_n，按分数排序并返回前 N 个
+                if top_n is not None and top_n > 0:
+                    results.sort(key=lambda x: x["relevance_score"], reverse=True)
+                    results = results[:top_n]
+
+                return results
+            except Exception as e:
+                logger.error(f"Rerank failed: {e}")
+                # 返回默认分数
+                default_results = [{"index": i, "relevance_score": 0.5} for i in range(len(documents))]
+                if top_n is not None and top_n > 0:
+                    return default_results[:top_n]
+                return default_results
+
+        return rerank_func
 
     async def index_file(self, db_id: str, file_id: str, operator_id: str | None = None) -> dict:
         """
@@ -449,6 +495,12 @@ class LightRagKB(KnowledgeBase):
                 "only_need_context": True,
                 "top_k": 10,
             } | filtered_kwargs
+
+            # 如果没有显式设置 enable_rerank，使用全局配置
+            if "enable_rerank" not in params_dict and config.enable_reranker:
+                params_dict["enable_rerank"] = True
+                logger.debug("Using global reranker setting: enable_rerank=True")
+
             param = QueryParam(**params_dict)
 
             # 执行查询
@@ -622,6 +674,13 @@ class LightRagKB(KnowledgeBase):
                     {"value": "graph", "label": "仅 Entity/Relation", "description": "仅返回知识图谱信息"},
                     {"value": "all", "label": "全部", "description": "返回文档片段和知识图谱信息"},
                 ],
+            },
+            {
+                "key": "enable_rerank",
+                "label": "启用重排序",
+                "type": "boolean",
+                "default": False,
+                "description": f"使用系统配置的重排序模型（当前: {config.reranker}）对检索结果进行重排序",
             },
         ]
 

@@ -31,69 +31,29 @@ export const useInfoStore = defineStore('info', () => {
   )
 
   // 计算属性 - 功能特性
-  const features = computed(
-    () =>
-      infoConfig.value.features || [
-        {
-          label: 'GitHub Stars',
-          value: '3200+',
-          description: '开发者社区的认可与支持',
-          icon: 'stars'
-        },
-        {
-          label: '已解决 Issues',
-          value: '250+',
-          description: '持续改进和问题解决能力',
-          icon: 'issues'
-        },
-        {
-          label: '累计 Commits',
-          value: '1200+',
-          description: '活跃的开发迭代和功能更新',
-          icon: 'commits'
-        },
-        {
-          label: '开源协议',
-          value: 'MIT 协议',
-          description: '完全免费，支持商业使用',
-          icon: 'license'
-        }
-      ]
-  )
+  const features = computed(() => infoConfig.value.features || [{
+    label: "知识库数量",
+    value: "100+",
+    description: "支持多个知识库并行管理",
+    icon: "default"
+  }, {
+    label: "智能体类型",
+    value: "4+",
+    description: "多种智能体满足不同场景需求",
+    icon: "resolved"
+  }, {
+    label: "文档处理",
+    value: "高效",
+    description: "支持多种文档格式智能解析",
+    icon: "commits"
+  }])
 
-  const actions = computed(
-    () =>
-      infoConfig.value.actions || [
-        {
-          name: '演示视频',
-          icon: 'video',
-          url: 'https://www.bilibili.com/video/BV1DF14BTETq'
-        },
-        {
-          name: '文档中心',
-          icon: 'docs',
-          url: 'https://xerrors.github.io/Yuxi-Know/'
-        },
-        {
-          name: '提交 Issue',
-          icon: 'issue',
-          url: 'https://github.com/xerrors/Yuxi-Know/issues/new/choose'
-        },
-        {
-          name: '开发路线图',
-          icon: 'roadmap',
-          url: 'https://github.com/xerrors/Yuxi-Know#roadmap'
-        }
-      ]
-  )
+  const actions = computed(() => infoConfig.value.actions || [])
 
   // 计算属性 - 页脚信息
-  const footer = computed(
-    () =>
-      infoConfig.value.footer || {
-        copyright: '© 江南语析 2025 [WIP] v0.12.138'
-      }
-  )
+  const footer = computed(() => infoConfig.value.footer || {
+    copyright: "© 上海曼恒数字技术股份有限公司 2025"
+  })
 
   // 动作方法
   function setInfoConfig(newConfig) {

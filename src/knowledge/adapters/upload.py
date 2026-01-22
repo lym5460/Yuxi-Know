@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 from src.knowledge.adapters.base import BaseNeo4jAdapter
+from src.utils import logger
 
 from .base import GraphAdapter, GraphMetadata
 
@@ -45,7 +46,11 @@ class UploadGraphAdapter(GraphAdapter):
         # 如果关键词是 "*" 或者为空，则执行采样查询
         if not params["keyword"] or params["keyword"] == "*":
             # 使用 BaseNeo4jAdapter 的连通子图查询
-            num = kwargs.get("max_nodes", 100)
+            num = kwargs.get("max_nodes")
+            logger.info(f"[Upload] query_nodes - max_nodes from kwargs: {num}")
+            if num is None:
+                num = 10000  # None 时设置一个大数值，相当于不限制
+            logger.info(f"[Upload] query_nodes - final num: {num}")
             raw_results = self._db._get_sample_nodes_with_connections(
                 num=num,
                 label_filter="Upload",

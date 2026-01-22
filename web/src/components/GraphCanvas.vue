@@ -1,6 +1,33 @@
 <template>
   <div class="graph-canvas-container" ref="rootEl">
-    <div v-show="graphData.nodes.length > 0" class="graph-canvas" ref="container"></div>
+    <!-- WebGL 不支持警告 -->
+    <div v-if="!webglSupported" class="webgl-error">
+      <a-alert
+        type="warning"
+        message="您的浏览器不支持 WebGL，无法渲染 3D 图谱"
+        show-icon
+      />
+    </div>
+    <!-- 加载状态 -->
+    <div v-if="loading && webglSupported" class="loading-overlay">
+      <div class="loading-content">
+        <a-spin size="large" />
+        <div class="loading-tip">
+          <div class="loading-text">正在渲染图谱... {{ loadingProgress }}%</div>
+          <div class="loading-subtext" v-if="graphData.nodes.length > 0">
+            {{ graphData.nodes.length }} 个节点，{{ graphData.edges.length }} 条边
+          </div>
+          <div class="loading-subtext warning" v-if="graphData.nodes.length > 2000">
+            ⚡ 大数据集渲染中，预计需要 3-5 秒
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 自定义 Tooltip -->
+    <div v-if="tooltipVisible" class="custom-tooltip" :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }">
+      {{ tooltipContent }}
+    </div>
+    <div class="graph-canvas" ref="container"></div>
     <div class="slots">
       <div v-if="$slots.top" class="overlay top">
         <slot name="top" />
@@ -20,6 +47,11 @@
           <span class="stat-value">{{ graphData.edges.length }}</span>
           <span v-if="graphInfo?.edge_count" class="stat-total">/ {{ graphInfo.edge_count }}</span>
         </div>
+        <!-- 大数据集提示 -->
+        <div v-if="graphData.nodes.length > 2000" class="performance-tip">
+          <span class="tip-icon">⚡</span>
+          <span class="tip-text">性能模式</span>
+        </div>
       </div>
       <div v-if="$slots.bottom" class="overlay bottom">
         <slot name="bottom" />
@@ -29,380 +61,485 @@
 </template>
 
 <script setup>
-import { Graph } from '@antv/g6'
-import { onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+/**
+ * GraphCanvas - 3D 知识图谱可视化组件
+ * 
+ * 融合 3d-force-graph 官方示例的功能：
+ * - text-nodes: 使用 SpriteText 显示节点文本
+ * - text-links: 使用 SpriteText 显示边文本
+ * - click-to-focus: 点击节点相机聚焦
+ * - highlight: 悬停高亮节点及邻居
+ */
+import ForceGraph3D from '3d-force-graph'
+import SpriteText from 'three-spritetext'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useThemeStore } from '@/stores/theme'
 
 const props = defineProps({
+  /** 图谱数据，包含 nodes 和 edges 数组 */
   graphData: {
     type: Object,
     required: true,
     default: () => ({ nodes: [], edges: [] })
   },
+  /** 图谱统计信息 */
   graphInfo: {
     type: Object,
     default: () => ({})
   },
+  /** 节点标签字段名 */
   labelField: { type: String, default: 'name' },
-  autoFit: { type: Boolean, default: true },
-  autoResize: { type: Boolean, default: true },
-  layoutOptions: { type: Object, default: () => ({}) },
-  nodeStyleOptions: { type: Object, default: () => ({}) },
-  edgeStyleOptions: { type: Object, default: () => ({}) },
+  /** 搜索高亮关键词数组 */
+  highlightKeywords: { type: Array, default: () => [] },
+  /** 是否启用焦点邻居模式 */
   enableFocusNeighbor: { type: Boolean, default: true },
-  sizeByDegree: { type: Boolean, default: true },
-  highlightKeywords: { type: Array, default: () => [] }
+  /** 是否根据度数调整大小 */
+  sizeByDegree: { type: Boolean, default: true }
 })
 
-const emit = defineEmits(['ready', 'data-rendered', 'node-click', 'edge-click', 'canvas-click'])
+const emit = defineEmits([
+  'ready',
+  'data-rendered',
+  'node-click',
+  'edge-click',
+  'canvas-click'
+])
 
 const container = ref(null)
 const rootEl = ref(null)
 const themeStore = useThemeStore()
+const loading = ref(true)
+const loadingProgress = ref(0)
+const webglSupported = ref(true)
+const tooltipContent = ref('')
+const tooltipVisible = ref(false)
+const tooltipX = ref(0)
+const tooltipY = ref(0)
 let graphInstance = null
 let resizeObserver = null
 let renderTimeout = null
-let retryCount = 0
-const MAX_RETRIES = 5
+let progressInterval = null
 
-const defaultLayout = {
-  type: 'd3-force',
-  preventOverlap: true,
-  alphaDecay: 0.1,
-  alphaMin: 0.01,
-  velocityDecay: 0.6,
-  iterations: 150,
-  force: {
-    center: { x: 0.5, y: 0.5, strength: 0.1 },
-    charge: { strength: -400, distanceMax: 600 },
-    link: { distance: 100, strength: 0.8 }
-  },
-  collide: { radius: 40, strength: 0.8, iterations: 3 }
-}
+// Highlight 状态（已禁用悬停高亮以提升性能）
+// const highlightNodes = new Set()
+// const highlightLinks = new Set()
+// let hoverNode = null
 
-// CSS 变量解析工具函数
+/**
+ * 获取 CSS 变量值
+ */
 function getCSSVariable(variableName, element = document.documentElement) {
   return getComputedStyle(element).getPropertyValue(variableName).trim()
 }
 
+/**
+ * 检查 WebGL 支持
+ */
+function checkWebGLSupport() {
+  try {
+    const canvas = document.createElement('canvas')
+    return !!canvas.getContext('webgl') || !!canvas.getContext('experimental-webgl')
+  } catch (e) {
+    return false
+  }
+}
+
+/**
+ * 检查节点是否匹配搜索关键词
+ */
+function shouldHighlightNode(node) {
+  return props.highlightKeywords?.some(kw =>
+    kw.trim() !== '' && node.name.toLowerCase().includes(kw.toLowerCase())
+  )
+}
+
+/**
+ * 数据转换 + 建立邻居关系（参考 highlight 示例）
+ */
 function formatData() {
   const data = props.graphData || { nodes: [], edges: [] }
+  
+  // 计算节点度数
   const degrees = new Map()
-
-  for (const n of data.nodes) {
-    degrees.set(String(n.id), 0)
-  }
-  for (const e of data.edges) {
+  data.nodes.forEach(n => degrees.set(String(n.id), 0))
+  data.edges.forEach(e => {
     const s = String(e.source_id)
     const t = String(e.target_id)
     degrees.set(s, (degrees.get(s) || 0) + 1)
     degrees.set(t, (degrees.get(t) || 0) + 1)
-  }
+  })
 
-  const nodes = (data.nodes || []).map((n) => ({
-    id: String(n.id),
-    data: {
-      label: n[props.labelField] ?? n.name ?? String(n.id),
-      degree: degrees.get(String(n.id)) || 0,
-      original: n // 保存原始数据
+  // 转换节点
+  const nodes = (data.nodes || []).map((n) => {
+    const degree = degrees.get(String(n.id)) || 0
+    return {
+      id: String(n.id),
+      name: n[props.labelField] ?? n.name ?? String(n.id),
+      group: n.type || 'default',
+      degree: degree,
+      val: props.sizeByDegree ? Math.max(1, degree * 0.3) : 1,
+      neighbors: [], // 用于 highlight 功能
+      links: [], // 用于 highlight 功能
+      original: n
     }
-  }))
+  })
 
-  const edges = (data.edges || []).map((e, idx) => ({
-    id: e.id ? String(e.id) : `edge-${idx}`,
+  // 转换边
+  const links = (data.edges || []).map((e) => ({
     source: String(e.source_id),
     target: String(e.target_id),
-    data: {
-      label: e.type ?? '',
-      original: e // 保存原始数据
-    }
+    label: e.type ?? '',
+    original: e
   }))
 
-  return { nodes, edges }
+  // 建立节点邻居关系（参考 highlight 示例）
+  const nodeMap = new Map(nodes.map(n => [n.id, n]))
+  links.forEach(link => {
+    const a = nodeMap.get(link.source)
+    const b = nodeMap.get(link.target)
+    if (a && b) {
+      a.neighbors.push(b)
+      b.neighbors.push(a)
+      a.links.push(link)
+      b.links.push(link)
+    }
+  })
+
+  return { nodes, links }
 }
 
+/**
+ * 初始化图谱 - 融合 4 个示例的特性，支持自适应标签策略
+ */
 function initGraph() {
-  if (!container.value) return
+  if (!container.value || !webglSupported.value) return
 
   const width = container.value.offsetWidth
   const height = container.value.offsetHeight
 
-  if (width === 0 && height === 0) {
-    if (retryCount < MAX_RETRIES) {
-      retryCount++
-      clearTimeout(renderTimeout)
-      renderTimeout = setTimeout(initGraph, 200)
-    }
+  if (width === 0 || height === 0) {
+    setTimeout(initGraph, 200)
     return
   }
 
-  retryCount = 0
-  container.value.innerHTML = ''
-
+  // 清理旧实例
   if (graphInstance) {
-    try {
-      graphInstance.destroy()
-    } catch (e) {}
+    try { graphInstance._destructor() } catch (e) {}
     graphInstance = null
   }
+  container.value.innerHTML = ''
 
-  graphInstance = new Graph({
-    container: container.value,
-    width,
-    height,
-    autoFit: props.autoFit,
-    autoResize: props.autoResize,
-    layout: { ...defaultLayout, ...props.layoutOptions },
-    node: {
-      type: 'circle',
-      style: {
-        labelText: (d) => d.data.label,
-        labelFill: getCSSVariable('--gray-700'),
-        labelWordWrap: true, // enable label ellipsis
-        labelMaxWidth: '300%',
-        size: (d) => {
-          if (!props.sizeByDegree) return 24
-          const deg = d.data.degree || 0
-          return Math.min(15 + deg * 5, 50)
-        },
-        opacity: 0.9,
-        stroke: getCSSVariable('--color-bg-container'),
-        lineWidth: 1.5,
-        shadowColor: getCSSVariable('--gray-400'),
-        shadowBlur: 4,
-        ...(props.nodeStyleOptions.style || {})
-      },
-      palette: props.nodeStyleOptions.palette || {
-        field: 'label',
-        color: [
-          '#60a5fa',
-          '#34d399',
-          '#f59e0b',
-          '#f472b6',
-          '#22d3ee',
-          '#a78bfa',
-          '#f97316',
-          '#4ade80',
-          '#f43f5e',
-          '#2dd4bf'
-        ]
+  const isDark = themeStore.isDark
+  
+  // 检测节点数量，决定是否显示 3D 文本标签
+  const nodeCount = (props.graphData?.nodes || []).length
+  const showNodeLabels = nodeCount <= 2000
+  const showLinkLabels = nodeCount <= 2000
+
+  console.log(`图谱节点数: ${nodeCount}, 显示节点标签: ${showNodeLabels}`)
+
+  // 创建图谱实例
+  graphInstance = ForceGraph3D()(container.value)
+    .width(width)
+    .height(height)
+    .backgroundColor(getCSSVariable('--gray-0'))
+    // 节点自动着色
+    .nodeAutoColorBy('group')
+    // 节点 tooltip（始终启用，参考 large-graph 示例）
+    .nodeLabel(node => node.name)
+
+  // 1. text-nodes 示例：使用 SpriteText 显示节点文本（仅小数据集 ≤ 2000）
+  if (showNodeLabels) {
+    graphInstance
+      .nodeThreeObject(node => {
+        const sprite = new SpriteText(node.name)
+        sprite.material.depthWrite = false // 背景透明
+        sprite.color = node.color || (isDark ? '#e0e0e0' : '#333333')
+        sprite.textHeight = 8
+        sprite.center.y = -0.6 // 将文本移到节点上方
+        return sprite
+      })
+      .nodeThreeObjectExtend(true) // 保留原始节点球体
+  }
+  
+  // 边样式
+  graphInstance
+    .linkWidth(1)
+    .linkColor(() => getCSSVariable('--gray-400'))
+    .linkOpacity(isDark ? 0.5 : 0.3)
+    .linkDirectionalArrowLength(3)
+    .linkDirectionalArrowRelPos(1)
+    // 边 tooltip（始终启用）
+    .linkLabel(link => link.label || '')
+  
+  // 3. text-links 示例：使用 SpriteText 显示边文本（仅小数据集 ≤ 2000）
+  if (showLinkLabels) {
+    graphInstance
+      .linkThreeObjectExtend(true)
+      .linkThreeObject(link => {
+        if (!link.label) return null
+        
+        const sprite = new SpriteText(link.label)
+        sprite.color = isDark ? '#888888' : 'lightgrey'
+        sprite.textHeight = 3
+        return sprite
+      })
+      .linkPositionUpdate((sprite, { start, end }) => {
+        if (!sprite) return
+        // 计算中点位置
+        const middlePos = {
+          x: start.x + (end.x - start.x) / 2,
+          y: start.y + (end.y - start.y) / 2,
+          z: start.z + (end.z - start.z) / 2
+        }
+        Object.assign(sprite.position, middlePos)
+      })
+  }
+  
+  graphInstance
+    // 4. 悬停事件 - 用于自定义 tooltip（大数据集时）
+    .onNodeHover(node => {
+      if (node) {
+        tooltipContent.value = node.name
+        tooltipVisible.value = true
+      } else {
+        tooltipVisible.value = false
       }
-    },
-    edge: {
-      type: 'quadratic',
-      style: {
-        labelText: (d) => d.data.label,
-        labelFill: getCSSVariable('--gray-800'),
-        labelBackground: true,
-        labelBackgroundFill: getCSSVariable('--gray-100'),
-        stroke: getCSSVariable('--gray-400'),
-        opacity: 0.8,
-        lineWidth: 1.2,
-        endArrow: true,
-        ...(props.edgeStyleOptions.style || {})
+    })
+    .onLinkHover(link => {
+      if (link && link.label) {
+        tooltipContent.value = link.label
+        tooltipVisible.value = true
+      } else if (!link) {
+        tooltipVisible.value = false
       }
-    },
-    behaviors: [
-      'drag-element',
-      'zoom-canvas',
-      'drag-canvas',
-      'hover-activate',
-      {
-        type: 'click-select',
-        degree: 1,
-        state: 'selected', // 选中的状态
-        neighborState: 'active', // 相邻节点附着状态
-        unselectedState: 'inactive', // 未选中节点状态
-        multiple: true,
-        trigger: ['shift'],
-        // 禁用默认的选中效果，避免与自定义事件冲突
-        disableDefault: false
-      }
-    ]
-  })
+    })
+    
+    // 5. click-to-focus 示例：点击节点相机聚焦
+    .onNodeClick(node => {
+      if (!node) return
+      
+      // 发送点击事件
+      emit('node-click', {
+        id: node.id,
+        data: {
+          label: node.name,
+          degree: node.degree,
+          original: node.original
+        }
+      })
 
-  // 绑定事件
-  graphInstance.on('node:click', (evt) => {
-    const { target } = evt
-    // 获取节点ID
-    const nodeId = target.id
-    const nodeData = graphInstance.getNodeData(nodeId)
-    emit('node-click', nodeData)
-  })
+      // 相机聚焦到节点（参考 click-to-focus 示例）
+      const distance = 100
+      const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z)
 
-  graphInstance.on('edge:click', (evt) => {
-    const { target } = evt
-    const edgeId = target.id
-    const edgeData = graphInstance.getEdgeData(edgeId)
-    emit('edge-click', edgeData)
-  })
+      const newPos = node.x || node.y || node.z
+        ? { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }
+        : { x: 0, y: 0, z: distance }
 
-  graphInstance.on('canvas:click', (evt) => {
-    // 只有点击画布空白处才触发
-    if (!evt.target) {
+      graphInstance.cameraPosition(
+        newPos, // new position
+        node, // lookAt ({ x, y, z })
+        1000  // ms transition duration
+      )
+    })
+    .onLinkClick(link => {
+      if (!link) return
+      emit('edge-click', {
+        id: link.original?.id,
+        source: link.source.id || link.source,
+        target: link.target.id || link.target,
+        data: {
+          label: link.label,
+          original: link.original
+        }
+      })
+    })
+    .onBackgroundClick(() => {
       emit('canvas-click')
-    }
-  })
+    })
+
+  // 扩展节点间距（参考 text-nodes/highlight 示例）
+  graphInstance.d3Force('charge').strength(-120)
 
   emit('ready', graphInstance)
 }
 
+/**
+ * 更新高亮显示（已禁用悬停高亮，仅保留搜索高亮）
+ */
+function updateHighlight() {
+  if (!graphInstance) return
+  // 悬停高亮已禁用
+}
+
+/**
+ * 设置图谱数据
+ */
 function setGraphData() {
   if (!graphInstance) initGraph()
   if (!graphInstance) return
+
+  // 显示加载状态
+  loading.value = true
+  loadingProgress.value = 0
+
   const data = formatData()
 
   console.log('开始设置图谱数据:', {
     nodes: data.nodes.length,
-    edges: data.edges.length
+    links: data.links.length
   })
 
-  graphInstance.setData(data)
-  graphInstance.render()
-
-  // 手动触发布局重新计算，确保节点分布
-  setTimeout(() => {
-    try {
-      if (graphInstance && graphInstance.layout) {
-        graphInstance.layout()
-        console.log('触发布局重新计算')
-      }
-    } catch (error) {
-      console.warn('布局重新计算失败:', error)
+  // 模拟加载进度
+  clearInterval(progressInterval)
+  progressInterval = setInterval(() => {
+    if (loadingProgress.value < 90) {
+      loadingProgress.value += 10
     }
+  }, 100)
 
-    // 等待力导向布局稳定后再应用高亮
+  // 设置数据
+  graphInstance.graphData(data)
+
+  // 等待初始布局完成
+  const waitTime = data.nodes.length > 2000 ? 3000 : data.nodes.length > 1000 ? 2000 : 1000
+  setTimeout(() => {
+    clearInterval(progressInterval)
+    loadingProgress.value = 100
+    
     setTimeout(() => {
+      loading.value = false
+      loadingProgress.value = 0
       applyHighlightKeywords()
       emit('data-rendered')
-      console.log('图谱渲染完成，布局已稳定')
-    }, 1500)
-  }, 10) // 等待 10ms 确保布局完成
+      console.log('图谱渲染完成')
+    }, 300)
+  }, waitTime)
 }
 
-// 关键词高亮功能
+/**
+ * 应用搜索关键词高亮
+ */
 function applyHighlightKeywords() {
-  if (!graphInstance || !props.highlightKeywords || props.highlightKeywords.length === 0) return
-
-  const { nodes } = graphInstance.getData()
-  const updates = {}
-
-  nodes.forEach((node) => {
-    const nodeLabel = node.data.label || node.data[props.labelField] || String(node.id)
-    const shouldHighlight = props.highlightKeywords.some(
-      (keyword) => keyword.trim() !== '' && nodeLabel.toLowerCase().includes(keyword.toLowerCase())
-    )
-
-    if (shouldHighlight) {
-      updates[node.id] = ['highlighted']
-    }
-  })
-
-  if (Object.keys(updates).length > 0) {
-    graphInstance.setElementState(updates)
-    graphInstance.draw()
-  }
-}
-
-// 清除高亮
-function clearHighlights() {
   if (!graphInstance) return
 
-  const { nodes } = graphInstance.getData()
-  const updates = {}
+  const hasHighlightKeywords = props.highlightKeywords?.some(kw => kw.trim() !== '')
 
-  nodes.forEach((node) => {
-    updates[node.id] = []
-  })
-
-  if (Object.keys(updates).length > 0) {
-    graphInstance.setElementState(updates)
-    graphInstance.draw()
+  if (!hasHighlightKeywords) {
+    // 恢复自动着色 - 直接使用 node.color（由 nodeAutoColorBy 自动设置）
+    graphInstance.nodeColor(node => node.color)
+    return
   }
+  
+  // 搜索高亮 - 覆盖部分节点颜色
+  graphInstance.nodeColor(node => {
+    if (shouldHighlightNode(node)) {
+      return '#faad14' // 金黄色高亮
+    }
+    // 其他节点使用 nodeAutoColorBy 自动生成的颜色
+    return node.color
+  })
 }
 
-function renderGraph() {
-  if (!graphInstance) initGraph()
-  setGraphData()
+/**
+ * 清除搜索高亮
+ */
+function clearHighlights() {
+  if (!graphInstance) return
+  // 恢复使用 nodeAutoColorBy 自动生成的颜色
+  graphInstance.nodeColor(node => node.color)
 }
 
+/**
+ * 焦点模式 - 仅显示节点及邻居
+ */
+async function focusNode(id) {
+  if (!graphInstance || !props.enableFocusNeighbor) return
+
+  const data = graphInstance.graphData()
+  const targetNode = data.nodes.find(n => n.id === id)
+  if (!targetNode) return
+
+  const connectedNodeIds = new Set([id])
+  
+  // 使用节点的 neighbors 属性
+  if (targetNode.neighbors) {
+    targetNode.neighbors.forEach(neighbor => connectedNodeIds.add(neighbor.id))
+  }
+
+  // 更新可见性
+  graphInstance
+    .nodeVisibility(node => connectedNodeIds.has(node.id))
+    .linkVisibility(link => {
+      const sourceId = link.source.id || link.source
+      const targetId = link.target.id || link.target
+      return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)
+    })
+}
+
+/**
+ * 清除焦点模式
+ */
+async function clearFocus() {
+  if (!graphInstance) return
+  graphInstance
+    .nodeVisibility(true)
+    .linkVisibility(true)
+}
+
+/**
+ * 刷新图谱
+ */
 function refreshGraph() {
   if (graphInstance) {
-    try {
-      graphInstance.destroy()
-    } catch (e) {}
+    try { graphInstance._destructor() } catch (e) {}
     graphInstance = null
   }
   if (container.value) container.value.innerHTML = ''
-  retryCount = 0
+  
+  // 清除高亮状态（已禁用）
+  // highlightNodes.clear()
+  // highlightLinks.clear()
+  // hoverNode = null
+  
   clearTimeout(renderTimeout)
   renderTimeout = setTimeout(() => {
-    renderGraph()
+    initGraph()
+    setGraphData()
   }, 300)
 }
 
+/**
+ * 适应视图
+ */
 function fitView() {
-  if (graphInstance)
-    try {
-      graphInstance.fitView()
-    } catch (_) {}
+  if (graphInstance) {
+    graphInstance.zoomToFit(1000, 50)
+  }
 }
+
+/**
+ * 居中视图
+ */
 function fitCenter() {
-  if (graphInstance)
-    try {
-      graphInstance.fitCenter()
-    } catch (_) {}
+  if (graphInstance) {
+    graphInstance.zoomToFit(500, 50)
+  }
 }
+
+/**
+ * 获取图谱实例
+ */
 function getInstance() {
   return graphInstance
 }
 
-async function focusNode(id) {
-  if (!graphInstance || !props.enableFocusNeighbor) return
-  const { nodes, edges } = graphInstance.getData()
-  const nodeIds = nodes.map((n) => n.id)
-  const edgeIds = edges.map((e) => e.id)
-  const updates = {}
-  nodeIds.forEach((nid) => (updates[nid] = ['hidden']))
-  edgeIds.forEach((eid) => (updates[eid] = ['hidden']))
-  const neighborSet = new Set()
-  const related = []
-  edges.forEach((e) => {
-    if (e.source === id) {
-      neighborSet.add(e.target)
-      related.push(e.id)
-    } else if (e.target === id) {
-      neighborSet.add(e.source)
-      related.push(e.id)
-    }
-  })
-  updates[id] = ['focus']
-  Array.from(neighborSet).forEach((nid) => (updates[nid] = ['focus']))
-  related.forEach((eid) => (updates[eid] = ['focus']))
-  await graphInstance.setElementState(updates)
-  await graphInstance.draw()
-}
-
-async function clearFocus() {
-  if (!graphInstance) return
-  const { nodes, edges } = graphInstance.getData()
-  const nodeIds = nodes.map((n) => n.id)
-  const edgeIds = edges.map((e) => e.id)
-  const updates = {}
-  nodeIds.forEach((nid) => (updates[nid] = []))
-  edgeIds.forEach((eid) => (updates[eid] = []))
-  await graphInstance.setElementState(updates)
-  await graphInstance.draw()
-}
-
-watch(
-  () => props.graphData,
-  () => {
-    clearTimeout(renderTimeout)
-    renderTimeout = setTimeout(() => setGraphData(), 50)
-  },
-  { deep: true }
-)
+// 监听数据变化
+watch(() => props.graphData, () => {
+  clearTimeout(renderTimeout)
+  renderTimeout = setTimeout(() => setGraphData(), 50)
+}, { deep: true })
 
 // 监听关键词变化
 watch(
@@ -416,47 +553,97 @@ watch(
   { deep: true }
 )
 
-// 监听主题切换，重新加载图形
-watch(
-  () => themeStore.isDark,
-  () => {
-    if (graphInstance) {
-      refreshGraph()
+// 监听主题切换
+watch(() => themeStore.isDark, (isDark) => {
+  if (graphInstance) {
+    const nodeCount = graphInstance.graphData().nodes.length
+    const showNodeLabels = nodeCount <= 2000
+    const showLinkLabels = nodeCount <= 2000
+    
+    // 更新背景色
+    graphInstance.backgroundColor(getCSSVariable('--gray-0'))
+    
+    // 更新边样式
+    graphInstance
+      .linkColor(() => getCSSVariable('--gray-400'))
+      .linkOpacity(isDark ? 0.5 : 0.3)
+    
+    // 仅在小数据集时更新 3D 文本标签颜色
+    if (showNodeLabels) {
+      graphInstance.nodeThreeObject(node => {
+        const sprite = new SpriteText(node.name)
+        sprite.material.depthWrite = false
+        sprite.color = node.color || (isDark ? '#e0e0e0' : '#333333')
+        sprite.textHeight = 8
+        sprite.center.y = -0.6
+        return sprite
+      })
+    }
+    
+    if (showLinkLabels) {
+      graphInstance.linkThreeObject(link => {
+        if (!link.label) return null
+        const sprite = new SpriteText(link.label)
+        sprite.color = isDark ? '#888888' : 'lightgrey'
+        sprite.textHeight = 3
+        return sprite
+      })
     }
   }
-)
+})
 
 onMounted(() => {
-  // ResizeObserver 监听容器尺寸，自动重渲染
-  if (window.ResizeObserver) {
+  // 检查 WebGL 支持
+  webglSupported.value = checkWebGLSupport()
+  if (!webglSupported.value) {
+    loading.value = false
+    return
+  }
+
+  // ResizeObserver 监听容器尺寸
+  if (window.ResizeObserver && container.value) {
     resizeObserver = new ResizeObserver(() => {
       if (!container.value || !graphInstance) return
       const width = container.value.offsetWidth
       const height = container.value.offsetHeight
-      graphInstance.changeSize(width, height)
+      graphInstance.width(width).height(height)
     })
-    if (container.value) resizeObserver.observe(container.value)
+    resizeObserver.observe(container.value)
   }
 
+  // 监听鼠标移动以更新 tooltip 位置
+  const handleMouseMove = (e) => {
+    if (tooltipVisible.value) {
+      tooltipX.value = e.clientX + 10
+      tooltipY.value = e.clientY + 10
+    }
+  }
+  window.addEventListener('mousemove', handleMouseMove)
+
+  // 初始化图谱
   clearTimeout(renderTimeout)
   renderTimeout = setTimeout(() => {
-    renderGraph()
+    initGraph()
+    setGraphData()
   }, 300)
-
-  window.addEventListener('resize', refreshGraph)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', refreshGraph)
-  if (resizeObserver && container.value) resizeObserver.unobserve(container.value)
+  if (resizeObserver && container.value) {
+    resizeObserver.unobserve(container.value)
+  }
   clearTimeout(renderTimeout)
-  try {
-    graphInstance?.destroy()
-  } catch (e) {}
+  clearInterval(progressInterval)
+  try { graphInstance?._destructor() } catch (e) {}
   graphInstance = null
+  
+  // 清理状态（已禁用）
+  // highlightNodes.clear()
+  // highlightLinks.clear()
+  // hoverNode = null
 })
 
-// 暴露方法
+// 暴露公共方法
 defineExpose({
   refreshGraph,
   fitView,
@@ -471,107 +658,197 @@ defineExpose({
 </script>
 
 <style lang="less">
+// 全局样式 - 确保 3d-force-graph 的 tooltip 可见
+// 3d-force-graph 使用 scene-tooltip 类名
+:global(.scene-tooltip) {
+  pointer-events: none !important;
+  z-index: 99999 !important;
+  position: fixed !important;
+}
+</style>
+
+<style lang="less" scoped>
 .graph-canvas-container {
   position: relative;
   width: 100%;
   height: 100%;
-  // background-color: var(--gray-0);
+  overflow: visible; // 改为 visible，让 tooltip 可以显示在容器外
+  background-color: var(--gray-0);
+}
 
-  .graph-canvas {
-    width: 100%;
-    height: 100%;
-  }
+.webgl-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  width: 80%;
+  max-width: 500px;
+}
 
-  .graph-stats-panel {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 6px 12px;
-    background: var(--color-trans-light);
-    border: 1px solid var(--color-border-secondary);
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    pointer-events: auto;
-    z-index: 10;
-    font-size: 13px;
-    backdrop-filter: blur(4px);
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--gray-0);
+  backdrop-filter: blur(2px);
+  z-index: 200; // 提高层级，确保在所有内容之上（包括空状态）
 
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-
-      .stat-label {
-        color: var(--color-text-secondary);
-        font-weight: 500;
-      }
-
-      .stat-value {
-        color: var(--color-text);
-        font-weight: 600;
-      }
-
-      .stat-total {
-        color: var(--color-text-quaternary);
-        font-size: 11px;
-      }
-    }
-  }
-
-  .slots {
-    // 让整层覆盖容器默认不接收指针事件（便于穿透到底下画布）
-    pointer-events: none;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+  .loading-content {
     display: flex;
     flex-direction: column;
-    z-index: 999;
+    align-items: center;
+    padding: 32px;
+    background: var(--gray-50);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--gray-200);
+  }
 
-    .overlay {
-      width: 100%;
-      flex-shrink: 0;
-      flex-grow: 0;
-      pointer-events: auto;
+  .loading-tip {
+    text-align: center;
+    margin-top: 20px;
 
-      &.top {
-        top: 0;
-      }
-      &.bottom {
-        bottom: 0;
-      }
+    .loading-text {
+      font-size: 16px;
+      color: var(--gray-900);
+      font-weight: 600;
+      margin-bottom: 8px;
     }
-    .canvas-content {
-      // 中间内容层及其子元素全部穿透
-      pointer-events: none;
-      flex: 1;
-      background: transparent !important;
-    }
-    .canvas-content * {
-      pointer-events: none;
+
+    .loading-subtext {
+      font-size: 13px;
+      color: var(--gray-600);
+      margin-top: 6px;
+      line-height: 1.6;
+
+      &.warning {
+        color: var(--color-warning-700);
+        font-weight: 500;
+      }
     }
   }
 }
 
-/* 高亮节点的脉冲动画效果 */
-@keyframes highlightPulse {
-  0% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.3) drop-shadow(0 0 8px rgba(255, 0, 0, 0.8));
-  }
-  100% {
-    filter: brightness(1);
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.custom-tooltip {
+  position: fixed;
+  padding: 6px 10px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gray-900);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  pointer-events: none;
+  z-index: 99999;
+  white-space: nowrap;
+  max-width: 300px;
+  word-break: break-all;
+}
+
+.slots {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 100; // 提高 z-index，但保持 pointer-events: none，不会挡住 tooltip
+
+  > * {
+    pointer-events: auto;
   }
 }
 
-.highlight-animation {
-  animation: highlightPulse 2s infinite ease-in-out;
+.overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 20px;
+
+  &.top {
+    top: 0;
+  }
+
+  &.bottom {
+    bottom: 0;
+  }
+}
+
+.canvas-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.graph-stats-panel {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+  z-index: 101; // 比 slots 稍高，但不挡 tooltip
+
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    .stat-label {
+      color: var(--gray-600);
+      font-weight: 500;
+    }
+
+    .stat-value {
+      color: var(--primary-color);
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .stat-total {
+      color: var(--gray-500);
+      font-size: 12px;
+    }
+  }
+
+  .performance-tip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--color-warning-100);
+    border-radius: 4px;
+    border: 1px solid var(--color-warning-300);
+
+    .tip-icon {
+      font-size: 14px;
+    }
+
+    .tip-text {
+      color: var(--color-warning-700);
+      font-size: 12px;
+      font-weight: 500;
+    }
+  }
 }
 </style>
+

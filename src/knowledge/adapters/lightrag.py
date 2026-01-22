@@ -30,7 +30,11 @@ class LightRAGGraphAdapter(GraphAdapter):
     async def query_nodes(self, keyword: str, **kwargs) -> dict[str, Any]:
         """查询节点 (Query nodes)"""
         kb_id = kwargs.get("kb_id") or self.kb_id
-        limit = kwargs.get("max_nodes", kwargs.get("limit", 50))
+        limit = kwargs.get("max_nodes")
+        if limit is None:
+            limit = kwargs.get("limit")  # 兼容旧的 limit 参数
+        if limit is None:
+            limit = 10000  # 如果都为 None，设置一个大数值（相当于不限制）
         max_depth = kwargs.get("max_depth", 1)  # 默认为 1，以返回边
 
         # 如果 keyword 为 *，强制 max_depth=1 至少

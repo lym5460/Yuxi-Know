@@ -777,12 +777,9 @@ const getAuthHeaders = () => {
 }
 
 const openDocLink = () => {
-  window.open(
-    'https://xerrors.github.io/Yuxi-Know/latest/advanced/document-processing.html',
-    '_blank',
-    'noopener'
-  )
-}
+  // 移除外部文档链接
+  message.info('请联系管理员获取文档处理帮助');
+};
 
 const chunkData = async () => {
   if (!databaseId.value) {

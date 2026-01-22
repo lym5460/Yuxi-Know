@@ -72,12 +72,13 @@
                   />
                 </template>
               </a-input>
-              <a-input
+              <a-input-number
                 v-model:value="sampleNodeCount"
-                placeholder="查询数量"
-                style="width: 100px"
+                placeholder="节点数量"
+                style="width: 120px"
+                :min="1"
+                :step="100"
                 @keydown.enter="loadSampleNodes"
-                :loading="graph.fetching"
               >
                 <template #suffix>
                   <component
@@ -85,7 +86,7 @@
                     @click="loadSampleNodes"
                   />
                 </template>
-              </a-input>
+              </a-input-number>
             </div>
             <div class="actions-right">
               <a-button type="default" @click="exportGraphData" :icon="h(ExportOutlined)">
@@ -95,7 +96,7 @@
           </div>
         </template>
         <template #content>
-          <a-empty v-show="graph.graphData.nodes.length === 0" style="padding: 4rem 0" />
+          <a-empty v-if="graph.graphData.nodes.length === 0 && !graph.fetching" style="padding: 4rem 0;"/>
         </template>
       </GraphCanvas>
       <!-- 详情浮动卡片 -->
@@ -232,8 +233,8 @@ const modelMatched = computed(
 const router = useRouter()
 const graphRef = ref(null)
 const graphInfo = ref(null)
-const fileList = ref([])
-const sampleNodeCount = ref(100)
+const fileList = ref([]);
+const sampleNodeCount = ref(1500); // 默认查询 1500 个节点
 
 const graph = reactive(useGraph(graphRef))
 
@@ -412,14 +413,16 @@ const addDocumentByFile = () => {
 }
 
 const loadSampleNodes = () => {
+  // 不再限制节点数量，null 表示获取所有节点
+  const maxNodes = sampleNodeCount.value || null
+
   graph.fetching = true
 
-  unifiedApi
-    .getSubgraph({
-      db_id: state.selectedDbId,
-      node_label: '*',
-      max_nodes: sampleNodeCount.value
-    })
+  unifiedApi.getSubgraph({
+    db_id: state.selectedDbId,
+    node_label: '*',
+    max_nodes: maxNodes
+  })
     .then((data) => {
       // Normalize data structure if needed
       const result = data.data
@@ -439,18 +442,20 @@ const onSearch = () => {
     return
   }
 
+  // 不再限制节点数量，null 表示获取所有节点
+  const maxNodes = sampleNodeCount.value || null
+
   if (isNeo4j.value && graphInfo?.value?.embed_model_name !== cur_embed_model.value) {
     // 可选：提示模型不一致
   }
 
   state.searchLoading = true
 
-  unifiedApi
-    .getSubgraph({
-      db_id: state.selectedDbId,
-      node_label: state.searchInput || '*',
-      max_nodes: sampleNodeCount.value
-    })
+  unifiedApi.getSubgraph({
+    db_id: state.selectedDbId,
+    node_label: state.searchInput || '*',
+    max_nodes: maxNodes
+  })
     .then((data) => {
       const result = data.data
       if (!result || !result.nodes || !result.edges) {

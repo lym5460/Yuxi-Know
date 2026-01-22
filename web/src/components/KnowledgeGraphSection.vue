@@ -124,11 +124,11 @@ const databaseId = computed(() => store.databaseId)
 const kbType = computed(() => store.database.kb_type)
 const kbTypeLabel = computed(() => getKbTypeLabel(kbType.value || 'lightrag'))
 
-const graphRef = ref(null)
-const showSettings = ref(false)
-const graphLimit = ref(50)
-const graphDepth = ref(2)
-const searchInput = ref('')
+const graphRef = ref(null);
+const showSettings = ref(false);
+const graphLimit = ref(100);
+const graphDepth = ref(2);
+const searchInput = ref('');
 
 const graph = reactive(useGraph(graphRef))
 
