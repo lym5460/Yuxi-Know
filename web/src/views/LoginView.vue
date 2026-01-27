@@ -211,7 +211,16 @@
         </div>
       </div>
     </main>
-
+  </div>
+  <div>
+    <div class="login-footer-wrapper">
+      <div class="login-footer-container">
+        <div class="footer-content">
+          <div class="footer-brand">
+            <h3 class="footer-brand-name">{{ brandName }}</h3>
+            <p class="footer-brand-subtitle">{{ brandSubtitle }}</p>
+            <p class="footer-brand-description">{{ brandDescription }}</p>
+          </div>
           <!-- 页脚 -->
           <div class="login-footer">
             <span>© 上海曼恒数字技术股份有限公司</span>
