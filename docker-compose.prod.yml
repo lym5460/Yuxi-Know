@@ -266,6 +266,37 @@ services:
       - app-network
     restart: unless-stopped
 
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cuda
+    container_name: whisper-asr
+    profiles:
+      - all
+    ports:
+      - "8100:8000"
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
+      - WHISPER__INFERENCE_DEVICE=${WHISPER_DEVICE:-auto}
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+    volumes:
+      - ./models/whisper:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - app-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 networks:
   app-network:
     driver: bridge

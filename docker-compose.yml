@@ -303,14 +303,15 @@ services:
 
   # Whisper ASR 服务 (语音识别)
   whisper:
-    image: fedirz/faster-whisper-server:latest-cpu
+    image: fedirz/faster-whisper-server:latest-cuda
     container_name: whisper-asr
     ports:
       - "8100:8000"
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__INFERENCE_DEVICE=${WHISPER_DEVICE:-auto}
-      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
       - ./models/whisper:/root/.cache/huggingface
     healthcheck:
@@ -322,6 +323,13 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 networks:
   app-network:

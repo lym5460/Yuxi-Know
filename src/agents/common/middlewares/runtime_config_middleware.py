@@ -51,7 +51,9 @@ class RuntimeConfigMiddleware(AgentMiddleware):
     ) -> ModelResponse:
         runtime_context = request.runtime.context
 
-        model = load_chat_model(getattr(runtime_context, "model", None))
+        model_name = getattr(runtime_context, "model", None)
+        model = load_chat_model(model_name)
+        logger.info(f"RuntimeConfigMiddleware 使用模型: {model_name}")
         enabled_tools = await self.get_tools_from_context(runtime_context)
         system_prompt = getattr(runtime_context, "system_prompt", None)
 

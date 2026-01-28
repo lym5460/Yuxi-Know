@@ -237,6 +237,11 @@ def get_kb_based_tools(db_names: list[str] | None = None) -> list:
                 else:
                     result = retriever(query_text, **kwargs)
                 logger.debug(f"Retrieved {len(result) if isinstance(result, list) else 'N/A'} results from {db_id}")
+
+                # 如果没有找到结果，返回明确的提示信息
+                if not result or (isinstance(result, list) and len(result) == 0):
+                    return f"在知识库 {retriever_info['name']} 中没有找到与 '{query_text}' 相关的内容。请尝试使用不同的关键词，或者直接根据你的知识回答用户的问题。"
+
                 return result
             except Exception as e:
                 logger.error(f"Error in retriever {db_id}: {e}")

@@ -49,11 +49,11 @@ class VoiceContext(BaseContext):
 
     # ASR 配置
     asr_provider: Annotated[str, {"__template_metadata__": {"kind": "select"}}] = field(
-        default="openai",
+        default="local-whisper",
         metadata={
             "name": "语音识别服务",
-            "options": ["openai", "faster-whisper"],
-            "description": "语音识别 (ASR) 服务提供商",
+            "options": ["openai", "local-whisper"],
+            "description": "语音识别 (ASR) 服务提供商，local-whisper 使用本地 Whisper 服务",
         },
     )
 
