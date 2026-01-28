@@ -87,18 +87,15 @@
                   >
                     <div class="voice-message-content">{{ msg.content }}</div>
                   </div>
+                  <!-- 实时预览消息 -->
+                  <div v-if="voiceInterimTranscript" class="voice-message user interim">
+                    <div class="voice-message-content">{{ voiceInterimTranscript }}</div>
+                  </div>
                 </div>
               </div>
 
               <!-- 底部控制区域 -->
               <div class="voice-controls">
-                <!-- 实时转写显示 -->
-                <div class="voice-transcription" v-if="voiceTranscription || voiceInterimTranscript">
-                  <span class="transcription-text" :class="{ interim: !voiceTranscription && voiceInterimTranscript }">
-                    {{ voiceTranscription || voiceInterimTranscript }}
-                  </span>
-                  <span class="transcription-hint" v-if="!voiceTranscription && voiceInterimTranscript">实时预览</span>
-                </div>
 
                 <!-- 音频可视化 -->
                 <AudioVisualizer 
@@ -1092,6 +1089,8 @@ const {
   onResult: (fullText, interim) => {
     // 实时更新预览文字
     voiceInterimTranscript.value = interim || fullText
+    // 滚动到底部
+    scrollVoiceMessages()
   },
   onFinalResult: (text) => {
     // 浏览器识别的最终结果（仅用于预览，不作为最终结果）
@@ -1633,6 +1632,11 @@ watch(
     border-bottom-right-radius: 4px;
   }
 
+  &.user.interim {
+    background: var(--main-color-light, rgba(22, 119, 255, 0.6));
+    opacity: 0.8;
+  }
+
   &.assistant {
     align-self: flex-start;
     background: var(--gray-100);
@@ -1654,35 +1658,6 @@ watch(
   gap: 16px;
   border-top: 1px solid var(--gray-100);
   background: var(--bg-color);
-}
-
-.voice-transcription {
-  padding: 10px 16px;
-  background: var(--gray-50);
-  border-radius: 20px;
-  max-width: 90%;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.transcription-text {
-  color: var(--gray-600);
-  font-size: 14px;
-}
-
-.transcription-text.interim {
-  color: var(--gray-400);
-  font-style: italic;
-}
-
-.transcription-hint {
-  font-size: 11px;
-  color: var(--gray-400);
-  background: var(--gray-100);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .voice-visualizer {
