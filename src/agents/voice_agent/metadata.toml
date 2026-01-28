@@ -1,0 +1,13 @@
+name = "语音助手"
+description = "支持实时语音交互的智能体"
+examples = [
+    "你好，请介绍一下你自己",
+    "今天天气怎么样？",
+    "帮我设置一个明天早上8点的闹钟",
+    "播放一首轻音乐",
+    "查询一下最近的新闻"
+]
+
+[capabilities]
+voice = true
+file_upload = true

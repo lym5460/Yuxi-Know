@@ -68,6 +68,7 @@ dependencies = [
     "torchvision==0.23",
     "docling>=2.68.0",
     "loguru>=0.7.3",
+    "edge-tts>=6.1.0",
     "redis>=5.2.0",
 ]
 [tool.ruff]

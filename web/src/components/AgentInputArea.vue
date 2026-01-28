@@ -29,6 +29,15 @@
         @upload-image="handleImageUpload"
         @upload-image-success="handleImageUploadSuccess"
       />
+      <div
+        v-if="supportsVoice"
+        class="voice-btn"
+        :class="{ active: isVoiceMode }"
+        @click="toggleVoiceMode"
+        title="语音输入"
+      >
+        <Mic :size="18" />
+      </div>
     </template>
     <template #actions-left>
       <div class="input-actions-left">
@@ -57,7 +66,7 @@ import AttachmentOptionsComponent from '@/components/AttachmentOptionsComponent.
 import { threadApi } from '@/apis'
 import { AgentValidator } from '@/utils/agentValidator'
 import { handleChatError, handleValidationError } from '@/utils/errorHandler'
-import { FolderCode } from 'lucide-vue-next'
+import { FolderDot, Mic } from 'lucide-vue-next'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -66,6 +75,7 @@ const props = defineProps({
   sendButtonDisabled: { type: Boolean, default: false },
   placeholder: { type: String, default: '输入问题...' },
   supportsFileUpload: { type: Boolean, default: false },
+  supportsVoice: { type: Boolean, default: false },
   agentId: { type: String, default: '' },
   threadId: { type: String, default: null },
   ensureThread: { type: Function, required: true },
@@ -79,25 +89,18 @@ const emit = defineEmits([
   'send',
   'keydown',
   'attachment-changed',
-  'toggle-panel'
+  'toggle-panel',
+  'toggle-voice'
 ])
 
 const inputRef = ref(null)
 const currentImage = ref(null)
+const isVoiceMode = ref(false)
 
-// 用于强制重建输入组件的 key
-const inputKey = ref(0)
-
-// 监听 hasStateContent 变化，当从有 state 切换到无 state 时重建组件
-watch(
-  () => props.hasStateContent,
-  (newVal, oldVal) => {
-    // 当 hasStateContent 从 true 变为 false 时，重建输入组件
-    if (oldVal === true && newVal === false) {
-      inputKey.value++
-    }
-  }
-)
+const toggleVoiceMode = () => {
+  isVoiceMode.value = !isVoiceMode.value
+  emit('toggle-voice', isVoiceMode.value)
+}
 
 const updateValue = (val) => {
   emit('update:modelValue', val)
@@ -222,6 +225,28 @@ defineExpose({
 
   span {
     line-height: 1;
+  }
+}
+
+.voice-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--main-color);
+    background: var(--gray-100);
+  }
+
+  &.active {
+    color: var(--color-error);
+    background: var(--color-error-bg);
   }
 }
 </style>

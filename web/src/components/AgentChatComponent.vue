@@ -67,66 +67,138 @@
 
       <div class="chat-content-container">
         <!-- Main Chat Area -->
-        <div class="chat-main" ref="chatMainContainer">
-          <div class="chat-box" ref="messagesContainer">
-            <div class="conv-box" v-for="(conv, index) in conversations" :key="index">
-              <AgentMessageComponent
-                v-for="(message, msgIndex) in conv.messages"
-                :message="message"
-                :key="msgIndex"
-                :is-processing="
-                  isProcessing &&
-                  conv.status === 'streaming' &&
-                  msgIndex === conv.messages.length - 1
-                "
-                :show-refs="showMsgRefs(message)"
-                @retry="retryMessage(message)"
-              >
-              </AgentMessageComponent>
-              <!-- 显示对话最后一个消息使用的模型 -->
-              <RefsComponent
-                v-if="shouldShowRefs(conv)"
-                :message="getLastMessage(conv)"
-                :show-refs="['model', 'copy', 'sources']"
-                :is-latest-message="false"
-                :sources="getConversationSources(conv)"
-              />
-            </div>
-
-            <!-- 生成中的加载状态 - 增强条件支持主聊天和resume流程 -->
-            <div class="generating-status" v-if="isProcessing && conversations.length > 0">
-              <div class="generating-indicator">
-                <div class="loading-dots">
-                  <div></div>
-                  <div></div>
-                  <div></div>
+        <div class="chat-main" ref="chatMainContainer" :class="{ 'voice-mode': supportsVoice }">
+          <!-- 语音模式 - 全屏布局 -->
+          <template v-if="supportsVoice">
+            <div class="voice-full-container">
+              <!-- 语音消息区域 -->
+              <div class="voice-messages-area" ref="voiceMessagesContainer">
+                <!-- 欢迎信息 - 仅在没有消息时显示 -->
+                <div v-if="voiceMessages.length === 0" class="voice-welcome">
+                  <div class="welcome-icon">🎙️</div>
+                  <h2>{{ currentAgentName }}</h2>
+                  <p>点击下方麦克风开始语音对话</p>
                 </div>
-                <span class="generating-text">正在生成回复...</span>
+                
+                <!-- 消息列表 -->
+                <div v-else class="voice-messages-list">
+                  <div 
+                    v-for="(msg, index) in voiceMessages" 
+                    :key="index" 
+                    class="voice-message"
+                    :class="msg.role"
+                  >
+                    <div class="voice-message-content">{{ msg.content }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 底部控制区域 -->
+              <div class="voice-controls">
+                <!-- 实时转写显示 -->
+                <div class="voice-transcription" v-if="voiceTranscription">
+                  <span class="transcription-text">{{ voiceTranscription }}</span>
+                </div>
+
+                <!-- 音频可视化 -->
+                <AudioVisualizer 
+                  v-if="voiceRecording" 
+                  :audio-level="voiceAudioLevel" 
+                  class="voice-visualizer"
+                />
+
+                <!-- 状态提示 -->
+                <div class="voice-status">
+                  <span class="status-dot" :class="voiceStatus"></span>
+                  <span class="status-text">{{ voiceStatusText }}</span>
+                </div>
+
+                <!-- 麦克风按钮 -->
+                <div 
+                  class="voice-mic-button"
+                  :class="{ recording: voiceRecording, speaking: voiceStatus === 'speaking' }"
+                  @click="toggleVoiceRecording"
+                >
+                  <Mic v-if="!voiceRecording" :size="32" />
+                  <MicOff v-else :size="32" />
+                </div>
+
+                <!-- 打断按钮 -->
+                <a-button
+                  v-if="voiceStatus === 'speaking'"
+                  class="voice-interrupt-btn"
+                  type="text"
+                  @click="handleVoiceInterrupt"
+                >
+                  <StopCircle :size="20" />
+                  <span>打断</span>
+                </a-button>
+
+                <p class="voice-hint">{{ voiceHintText }}</p>
               </div>
             </div>
-          </div>
-          <div class="bottom" :class="{ 'start-screen': !conversations.length }">
-            <!-- 人工审批弹窗 - 放在输入框上方 -->
-            <HumanApprovalModal
-              :visible="approvalState.showModal"
-              :question="approvalState.question"
-              :operation="approvalState.operation"
-              @approve="handleApprove"
-              @reject="handleReject"
-            />
+          </template>
 
-            <div class="message-input-wrapper">
-              <!-- 加载状态：加载消息 -->
-              <div v-if="isLoadingMessages" class="chat-loading">
-                <div class="loading-spinner"></div>
-                <span>正在加载消息...</span>
+          <!-- 文本模式 - 原有布局 -->
+          <template v-else>
+            <!-- 加载状态：加载消息 -->
+            <div v-if="isLoadingMessages" class="chat-loading">
+              <div class="loading-spinner"></div>
+              <span>正在加载消息...</span>
+            </div>
+
+            <div v-else-if="!conversations.length" class="chat-examples">
+              <div style="margin-bottom: 150px"></div>
+              <h1>您好，我是{{ currentAgentName }}！</h1>
+            </div>
+            <div class="chat-box" ref="messagesContainer">
+              <div class="conv-box" v-for="(conv, index) in conversations" :key="index">
+                <AgentMessageComponent
+                  v-for="(message, msgIndex) in conv.messages"
+                  :message="message"
+                  :key="msgIndex"
+                  :is-processing="
+                    isProcessing &&
+                    conv.status === 'streaming' &&
+                    msgIndex === conv.messages.length - 1
+                  "
+                  :show-refs="showMsgRefs(message)"
+                  @retry="retryMessage(message)"
+                >
+                </AgentMessageComponent>
+                <!-- 显示对话最后一个消息使用的模型 -->
+                <RefsComponent
+                  v-if="shouldShowRefs(conv)"
+                  :message="getLastMessage(conv)"
+                  :show-refs="['model', 'copy']"
+                  :is-latest-message="false"
+                />
               </div>
 
-              <!-- 打招呼区域 - 在输入框上方 -->
-              <div v-if="!conversations.length" class="chat-examples-input">
-                <h1>👋 您好，我是{{ currentAgentName }}！</h1>
+              <!-- 生成中的加载状态 - 增强条件支持主聊天和resume流程 -->
+              <div class="generating-status" v-if="isProcessing && conversations.length > 0">
+                <div class="generating-indicator">
+                  <div class="loading-dots">
+                    <div></div>
+                    <div></div>
+                    <div></div>
+                  </div>
+                  <span class="generating-text">正在生成回复...</span>
+                </div>
               </div>
+            </div>
+            <div class="bottom" :class="{ 'start-screen': !conversations.length }">
+              <!-- 人工审批弹窗 - 放在输入框上方 -->
+              <HumanApprovalModal
+                :visible="approvalState.showModal"
+                :question="approvalState.question"
+                :operation="approvalState.operation"
+                @approve="handleApprove"
+                @reject="handleReject"
+              />
 
+              <!-- 文本模式 UI -->
+              <div class="message-input-wrapper">
               <AgentInputArea
                 ref="messageInputRef"
                 v-model="userInput"
@@ -135,6 +207,7 @@
                 :send-button-disabled="(!userInput || !currentAgent) && !isProcessing"
                 placeholder="输入问题..."
                 :supports-file-upload="supportsFileUpload"
+                :supports-voice="false"
                 :agent-id="currentAgentId"
                 :thread-id="currentChatId"
                 :ensure-thread="ensureActiveThread"
@@ -166,8 +239,9 @@
               <div class="bottom-actions" v-else>
                 <p class="note">请注意辨别内容的可靠性</p>
               </div>
+              </div>
             </div>
-          </div>
+          </template>
         </div>
 
         <!-- Agent Panel Area -->
@@ -206,7 +280,7 @@ import AgentInputArea from '@/components/AgentInputArea.vue'
 import AgentMessageComponent from '@/components/AgentMessageComponent.vue'
 import ChatSidebarComponent from '@/components/ChatSidebarComponent.vue'
 import RefsComponent from '@/components/RefsComponent.vue'
-import { PanelLeftOpen, MessageCirclePlus, LoaderCircle, ChevronDown, Bot } from 'lucide-vue-next'
+import { PanelLeftOpen, MessageCirclePlus, LoaderCircle, ChevronDown, Bot, Mic, MicOff, StopCircle } from 'lucide-vue-next'
 import { handleChatError, handleValidationError } from '@/utils/errorHandler'
 import { ScrollController } from '@/utils/scrollController'
 import { AgentValidator } from '@/utils/agentValidator'
@@ -219,6 +293,10 @@ import HumanApprovalModal from '@/components/HumanApprovalModal.vue'
 import { useApproval } from '@/composables/useApproval'
 import { useAgentStreamHandler } from '@/composables/useAgentStreamHandler'
 import AgentPanel from '@/components/AgentPanel.vue'
+import AudioVisualizer from '@/components/voice/AudioVisualizer.vue'
+import { createVoiceWebSocket, sendAudio, sendControl } from '@/apis/voice_api'
+import { useAudioCapture } from '@/composables/useAudioCapture'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 
 // ==================== PROPS & EMITS ====================
 const props = defineProps({
@@ -349,8 +427,11 @@ const supportsFiles = computed(() => {
   return capabilities.includes('files')
 })
 
-const currentCapabilities = computed(() => {
-  return currentAgent.value?.capabilities || []
+// 检查当前智能体是否支持语音
+const supportsVoice = computed(() => {
+  if (!currentAgent.value) return false
+  const capabilities = currentAgent.value.capabilities || []
+  return capabilities.includes('voice')
 })
 
 // AgentState 相关计算属性
@@ -519,6 +600,8 @@ onUnmounted(() => {
   scrollController.cleanup()
   // 清理所有线程状态
   resetOnGoingConv()
+  // 清理语音资源
+  cleanupVoice()
 })
 
 // ==================== THREAD STATE MANAGEMENT ====================
@@ -1594,38 +1677,281 @@ const toggleAgentPanel = () => {
   isAgentPanelOpen.value = !isAgentPanelOpen.value
 }
 
-// 处理面板宽度调整（使用比例）
-// 向右拖动(deltaX > 0)让面板变窄，向左拖动(deltaX < 0)让面板变宽
-const handlePanelResize = (deltaX) => {
-  if (!panelWrapperRef.value) return
+// 语音模式状态
+const voiceStatus = ref('idle')
+const voiceTranscription = ref('')
+const voiceRecording = ref(false)
+const voiceAudioLevel = ref(0)
+const voiceMessages = ref([])
+const voiceMessagesContainer = ref(null)
+let voiceWs = null
 
-  // 初始化容器宽度
-  if (!panelContainerWidth) {
-    const container = document.querySelector('.chat-content-container')
-    panelContainerWidth = container ? container.clientWidth : window.innerWidth
+// 先初始化音频播放器
+const { playAudioChunk, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
+
+// 智能打断：当用户开始说话时立即停止 AI
+const handleSmartInterrupt = () => {
+  console.log('🎤 智能打断触发，当前状态:', voiceStatus.value, '录音状态:', voiceRecording.value)
+  
+  // 立即停止音频播放
+  stopVoiceAudio()
+  
+  // 设置打断状态，忽略后续的文字和音频
+  currentStreamingMsgIndex.value = -2
+  
+  // 如果 WebSocket 连接存在，发送打断命令
+  if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+    sendControl(voiceWs, 'interrupt')
+    console.log('📤 已发送打断命令到后端')
   }
+  
+  // 状态切换到监听
+  voiceStatus.value = 'listening'
+}
 
-  const currentWidth = panelWrapperRef.value.offsetWidth
-  // 反转 deltaX：向右拖(deltaX > 0)让面板变窄
-  const newWidth = currentWidth - deltaX
-  const newRatio = newWidth / panelContainerWidth
+const { startCapture, stopCapture, isSpeaking: voiceIsSpeaking } = useAudioCapture({
+  onAudioChunk: (chunk) => {
+    if (voiceWs) sendAudio(voiceWs, chunk)
+  },
+  onAudioLevel: (level) => {
+    voiceAudioLevel.value = level
+  },
+  onSpeechStart: () => {
+    console.log('🎤 语音开始，当前状态:', voiceStatus.value)
+    // 智能打断：只要用户开始说话，就停止音频播放
+    handleSmartInterrupt()
+  },
+  onSpeechEnd: () => {
+    console.log('🎤 语音结束，自动触发转录')
+    // VAD 检测到语音结束，自动发送 stop 触发转录
+    // 只有在监听状态下才触发转录（避免在打断后立即触发）
+    if (voiceRecording.value && voiceWs && voiceStatus.value === 'listening') {
+      sendControl(voiceWs, 'stop')
+      voiceStatus.value = 'processing'
+    }
+  },
+  // VAD 配置
+  vadEnabled: true,
+  vadThreshold: 0.08,    // 语音检测阈值（提高以过滤噪音）
+  vadSilenceMs: 600,     // 静音 600ms 后认为语音结束
+  vadPrefixMs: 200       // 保留语音开始前 200ms 的音频
+})
 
-  // 限制在合理范围内
-  if (newRatio >= minPanelRatio && newRatio <= maxPanelRatio) {
-    // 直接操作 DOM，不触发 Vue 响应式，使用 !important 确保不被覆盖
-    panelWrapperRef.value.style.setProperty('flex', `0 0 ${newWidth}px`, 'important')
+const voiceStatusText = computed(() => {
+  const texts = {
+    idle: '准备就绪',
+    connecting: '连接中...',
+    listening: '正在听您说...',
+    processing: '思考中...',
+    speaking: '正在回复...',
+    error: '连接出错'
+  }
+  return texts[voiceStatus.value] || ''
+})
+
+const voiceHintText = computed(() => {
+  if (voiceRecording.value) return '说完后会自动识别，点击可结束对话'
+  if (voiceStatus.value === 'speaking') return '直接说话即可打断 AI'
+  return '点击麦克风开始对话'
+})
+
+// 滚动语音消息到底部
+function scrollVoiceMessages() {
+  nextTick(() => {
+    if (voiceMessagesContainer.value) {
+      voiceMessagesContainer.value.scrollTop = voiceMessagesContainer.value.scrollHeight
+    }
+  })
+}
+
+// 当前正在流式输出的 AI 消息索引
+const currentStreamingMsgIndex = ref(-1)
+
+function handleVoiceMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      voiceStatus.value = msg.status
+      // 当状态变为 idle 且正在录音中，自动重新开始监听
+      if (msg.status === 'idle' && voiceRecording.value) {
+        sendControl(voiceWs, 'start')
+        voiceStatus.value = 'listening'
+      }
+      // 当状态变为 listening 时，重置音频播放器和打断状态
+      if (msg.status === 'listening') {
+        resetVoiceAudio()
+        // 重置打断状态，允许接收新的消息
+        if (currentStreamingMsgIndex.value === -2) {
+          currentStreamingMsgIndex.value = -1
+        }
+      }
+      // 当 AI 开始说话时，确保麦克风仍在监听（用于智能打断）
+      if (msg.status === 'speaking' && voiceRecording.value) {
+        // 麦克风保持开启，继续采集音频用于智能打断检测
+        console.log('🔊 AI 开始说话，麦克风保持监听以支持智能打断')
+      }
+      break
+    case 'transcription':
+      voiceTranscription.value = msg.text
+      if (msg.is_final && msg.text) {
+        voiceMessages.value.push({ role: 'user', content: msg.text })
+        voiceTranscription.value = ''
+        // 重置流式消息索引，准备接收新的 AI 回复
+        currentStreamingMsgIndex.value = -1
+        // 重置音频播放器，准备播放新的回复
+        resetVoiceAudio()
+        scrollVoiceMessages()
+      }
+      break
+    case 'response':
+      // 流式文本：追加到当前 AI 消息
+      // 如果已经被打断（currentStreamingMsgIndex === -2），忽略后续文本
+      if (msg.text && currentStreamingMsgIndex.value !== -2) {
+        if (currentStreamingMsgIndex.value === -1) {
+          // 创建新的 AI 消息
+          voiceMessages.value.push({ role: 'assistant', content: msg.text })
+          currentStreamingMsgIndex.value = voiceMessages.value.length - 1
+        } else {
+          // 追加到现有消息
+          voiceMessages.value[currentStreamingMsgIndex.value].content += msg.text
+        }
+        scrollVoiceMessages()
+      }
+      break
+    case 'response_end':
+      // 响应结束，重置流式消息索引
+      currentStreamingMsgIndex.value = -1
+      break
+    case 'audio':
+      // 只有在正常状态下才播放音频（非打断状态）
+      if (msg.audio_data && currentStreamingMsgIndex.value !== -2) {
+        playAudioChunk(msg.audio_data)
+        voiceStatus.value = 'speaking'
+      }
+      break
+    case 'audio_end':
+      // 音频播放结束，如果还在录音模式，切换回监听
+      if (voiceRecording.value) {
+        voiceStatus.value = 'listening'
+        sendControl(voiceWs, 'start')
+        // 重置打断状态
+        if (currentStreamingMsgIndex.value === -2) {
+          currentStreamingMsgIndex.value = -1
+        }
+      } else {
+        voiceStatus.value = 'idle'
+      }
+      break
+    case 'error':
+      console.error('Voice error:', msg.error)
+      message.error(msg.error || '语音服务出错')
+      voiceStatus.value = 'error'
+      currentStreamingMsgIndex.value = -1
+      break
   }
 }
 
-// 拖拽状态变化时，同步最终状态到 Vue 响应式数据
-const handleResizingChange = (isResizingState) => {
-  isResizing.value = isResizingState
+function connectVoiceWebSocket() {
+  if (voiceWs) return
 
-  // 拖拽结束时，同步 DOM 宽度到响应式数据
-  if (!isResizingState && panelWrapperRef.value && panelContainerWidth) {
-    const finalWidth = panelWrapperRef.value.offsetWidth
-    panelRatio.value = finalWidth / panelContainerWidth
-    panelContainerWidth = 0 // 重置，供下次使用
+  voiceStatus.value = 'connecting'
+  voiceWs = createVoiceWebSocket(currentAgentId.value, {
+    onMessage: handleVoiceMessage,
+    onOpen: () => {
+      voiceStatus.value = 'idle'
+    },
+    onClose: () => {
+      voiceWs = null
+      if (voiceRecording.value) {
+        stopVoiceRecording()
+      }
+    },
+    onError: () => {
+      voiceStatus.value = 'error'
+      message.error('WebSocket 连接失败')
+    }
+  })
+}
+
+function startVoiceRecording() {
+  // 先停止任何正在播放的音频
+  stopVoiceAudio()
+  // 重置音频播放器状态
+  resetVoiceAudio()
+  // 重置流式消息索引
+  currentStreamingMsgIndex.value = -1
+  
+  connectVoiceWebSocket()
+  
+  const checkAndStart = () => {
+    if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+      // 如果当前正在处理或说话，先发送打断命令
+      if (voiceStatus.value === 'processing' || voiceStatus.value === 'speaking') {
+        sendControl(voiceWs, 'interrupt')
+      } else {
+        sendControl(voiceWs, 'start')
+      }
+      startCapture()
+      voiceRecording.value = true
+      voiceStatus.value = 'listening'
+    } else if (voiceWs) {
+      setTimeout(checkAndStart, 100)
+    }
+  }
+  checkAndStart()
+}
+
+function stopVoiceRecording() {
+  // 无条件停止音频播放
+  stopVoiceAudio()
+  
+  if (voiceWs) sendControl(voiceWs, 'stop')
+  stopCapture()
+  voiceRecording.value = false
+  voiceTranscription.value = ''
+  
+  if (voiceStatus.value === 'listening') {
+    voiceStatus.value = 'processing'
+  }
+}
+
+function toggleVoiceRecording() {
+  if (voiceRecording.value) {
+    stopVoiceRecording()
+  } else {
+    // 如果 AI 正在说话或处理中，先打断
+    if (voiceStatus.value === 'speaking' || voiceStatus.value === 'processing') {
+      handleVoiceInterrupt()
+    }
+    startVoiceRecording()
+  }
+}
+
+function handleVoiceInterrupt() {
+  // 立即停止音频播放
+  stopVoiceAudio()
+  // 设置打断状态，忽略后续的文字和音频
+  currentStreamingMsgIndex.value = -2
+  // 发送打断命令到后端
+  if (voiceWs) sendControl(voiceWs, 'interrupt')
+  // 重置音频播放器，准备接收新的音频
+  resetVoiceAudio()
+  // 如果正在录音，切换到监听状态
+  if (voiceRecording.value) {
+    voiceStatus.value = 'listening'
+  } else {
+    voiceStatus.value = 'idle'
+  }
+}
+
+function cleanupVoice() {
+  if (voiceWs) voiceWs.close()
+  stopCapture()
+  stopVoiceAudio()
+}
+
+const handleToggleVoice = (enabled) => {
+  if (enabled) {
+    message.info('语音模式已开启，请说话...')
   }
 }
 
@@ -1809,12 +2135,196 @@ watch(
   flex-direction: column;
   overflow-y: auto; /* Scroll is here now */
   position: relative;
-  transition:
-    flex-basis 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  min-width: 0; /* Prevent flex item from overflowing */
+  transition: flex 0.4s ease;
 
-  scrollbar-width: none;
+  // 语音模式全屏布局
+  &.voice-mode {
+    overflow: hidden;
+  }
+}
+
+// 语音模式样式
+.voice-full-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 700px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.voice-messages-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--gray-500);
+
+  .welcome-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--gray-700);
+    margin: 0 0 8px 0;
+  }
+
+  p {
+    font-size: 14px;
+    margin: 0;
+  }
+}
+
+.voice-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.voice-message {
+  padding: 12px 16px;
+  border-radius: 16px;
+  max-width: 80%;
+  word-wrap: break-word;
+  animation: fadeIn 0.3s ease;
+
+  &.user {
+    align-self: flex-end;
+    background: var(--main-color);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+
+  &.assistant {
+    align-self: flex-start;
+    background: var(--gray-100);
+    color: var(--gray-800);
+    border-bottom-left-radius: 4px;
+  }
+}
+
+.voice-message-content {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.voice-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  gap: 16px;
+  border-top: 1px solid var(--gray-100);
+  background: var(--bg-color);
+}
+
+.voice-transcription {
+  padding: 10px 16px;
+  background: var(--gray-50);
+  border-radius: 20px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.transcription-text {
+  color: var(--gray-600);
+  font-size: 14px;
+}
+
+.voice-visualizer {
+  height: 40px;
+  width: 200px;
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gray-300);
+  transition: all 0.3s;
+
+  &.idle { background: var(--gray-400); }
+  &.connecting { background: var(--color-warning); animation: pulse 1s infinite; }
+  &.listening { background: var(--color-success); animation: pulse 1s infinite; }
+  &.processing { background: var(--color-warning); animation: pulse 0.5s infinite; }
+  &.speaking { background: var(--main-color); animation: pulse 1s infinite; }
+  &.error { background: var(--color-error); }
+}
+
+.status-text {
+  font-size: 14px;
+  color: var(--gray-600);
+}
+
+.voice-mic-button {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--main-color);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px var(--shadow-2);
+
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px var(--shadow-3);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  &.recording {
+    background: var(--color-error);
+    animation: recording-pulse 1.5s infinite;
+  }
+
+  &.speaking {
+    background: var(--main-color);
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.voice-interrupt-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-error);
+  
+  &:hover {
+    color: var(--color-error);
+    background: var(--color-error-bg);
+  }
+}
+
+.voice-hint {
+  font-size: 13px;
+  color: var(--gray-400);
+  margin: 0;
 }
 
 .agent-panel-wrapper {
@@ -1984,6 +2494,25 @@ watch(
     padding: 0;
     border-top: none;
     z-index: 100; /* Ensure it's above other elements */
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes recording-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4);
+  }
+  50% { 
+    box-shadow: 0 0 0 20px rgba(255, 77, 79, 0);
   }
 }
 
