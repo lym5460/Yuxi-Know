@@ -96,8 +96,11 @@
               <!-- 底部控制区域 -->
               <div class="voice-controls">
                 <!-- 实时转写显示 -->
-                <div class="voice-transcription" v-if="voiceTranscription">
-                  <span class="transcription-text">{{ voiceTranscription }}</span>
+                <div class="voice-transcription" v-if="voiceTranscription || voiceInterimTranscript">
+                  <span class="transcription-text" :class="{ interim: !voiceTranscription && voiceInterimTranscript }">
+                    {{ voiceTranscription || voiceInterimTranscript }}
+                  </span>
+                  <span class="transcription-hint" v-if="!voiceTranscription && voiceInterimTranscript">实时预览</span>
                 </div>
 
                 <!-- 音频可视化 -->
@@ -297,6 +300,7 @@ import AudioVisualizer from '@/components/voice/AudioVisualizer.vue'
 import { createVoiceWebSocket, sendAudio, sendControl } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
+import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 
 // ==================== PROPS & EMITS ====================
 const props = defineProps({
@@ -1680,6 +1684,7 @@ const toggleAgentPanel = () => {
 // 语音模式状态
 const voiceStatus = ref('idle')
 const voiceTranscription = ref('')
+const voiceInterimTranscript = ref('')  // 实时预览文字
 const voiceRecording = ref(false)
 const voiceAudioLevel = ref(0)
 const voiceMessages = ref([])
@@ -1688,6 +1693,26 @@ let voiceWs = null
 
 // 先初始化音频播放器
 const { playAudioChunk, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
+
+// 初始化浏览器语音识别（用于实时预览）
+const { 
+  isSupported: speechRecognitionSupported,
+  start: startSpeechRecognition,
+  stop: stopSpeechRecognition,
+  reset: resetSpeechRecognition
+} = useSpeechRecognition({
+  lang: 'zh-CN',
+  continuous: true,
+  interimResults: true,
+  onResult: (fullText, interim) => {
+    // 实时更新预览文字
+    voiceInterimTranscript.value = interim || fullText
+  },
+  onFinalResult: (text) => {
+    // 浏览器识别的最终结果（仅用于预览，不作为最终结果）
+    console.log('🎤 浏览器识别结果:', text)
+  }
+})
 
 // 智能打断：当用户开始说话时立即停止 AI
 const handleSmartInterrupt = () => {
@@ -1705,6 +1730,10 @@ const handleSmartInterrupt = () => {
     console.log('📤 已发送打断命令到后端')
   }
   
+  // 重置实时预览
+  voiceInterimTranscript.value = ''
+  resetSpeechRecognition()
+  
   // 状态切换到监听
   voiceStatus.value = 'listening'
 }
@@ -1720,9 +1749,19 @@ const { startCapture, stopCapture, isSpeaking: voiceIsSpeaking } = useAudioCaptu
     console.log('🎤 语音开始，当前状态:', voiceStatus.value)
     // 智能打断：只要用户开始说话，就停止音频播放
     handleSmartInterrupt()
+    
+    // 启动浏览器语音识别进行实时预览
+    if (speechRecognitionSupported.value) {
+      resetSpeechRecognition()
+      startSpeechRecognition()
+    }
   },
   onSpeechEnd: () => {
     console.log('🎤 语音结束，自动触发转录')
+    
+    // 停止浏览器语音识别
+    stopSpeechRecognition()
+    
     // VAD 检测到语音结束，自动发送 stop 触发转录
     // 只有在监听状态下才触发转录（避免在打断后立即触发）
     if (voiceRecording.value && voiceWs && voiceStatus.value === 'listening') {
@@ -1795,6 +1834,8 @@ function handleVoiceMessage(msg) {
       if (msg.is_final && msg.text) {
         voiceMessages.value.push({ role: 'user', content: msg.text })
         voiceTranscription.value = ''
+        voiceInterimTranscript.value = ''  // 清除实时预览
+        resetSpeechRecognition()
         // 重置流式消息索引，准备接收新的 AI 回复
         currentStreamingMsgIndex.value = -1
         // 重置音频播放器，准备播放新的回复
@@ -1904,10 +1945,14 @@ function stopVoiceRecording() {
   // 无条件停止音频播放
   stopVoiceAudio()
   
+  // 停止浏览器语音识别
+  stopSpeechRecognition()
+  
   if (voiceWs) sendControl(voiceWs, 'stop')
   stopCapture()
   voiceRecording.value = false
   voiceTranscription.value = ''
+  voiceInterimTranscript.value = ''
   
   if (voiceStatus.value === 'listening') {
     voiceStatus.value = 'processing'
@@ -2237,11 +2282,27 @@ watch(
   border-radius: 20px;
   max-width: 90%;
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .transcription-text {
   color: var(--gray-600);
   font-size: 14px;
+}
+
+.transcription-text.interim {
+  color: var(--gray-400);
+  font-style: italic;
+}
+
+.transcription-hint {
+  font-size: 11px;
+  color: var(--gray-400);
+  background: var(--gray-100);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .voice-visualizer {
