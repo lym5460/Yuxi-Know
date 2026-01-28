@@ -264,8 +264,26 @@ async def voice_websocket(
     thread_id = str(uuid.uuid4())
     current_task: asyncio.Task | None = None  # 当前正在执行的任务
     is_cancelled = False  # 取消标志
+    
+    # 流式 ASR 状态
+    last_transcription = ""  # 上次转录结果，用于增量更新
+    transcription_task: asyncio.Task | None = None  # 转录任务
+    MIN_AUDIO_FOR_TRANSCRIPTION = 16000  # 最小音频长度（约0.5秒 @ 16kHz 16bit）
 
     await send_status(websocket, VoiceStatus.IDLE)
+    
+    async def do_interim_transcription():
+        """执行增量转录，发送中间结果"""
+        nonlocal last_transcription
+        if len(audio_buffer) < MIN_AUDIO_FOR_TRANSCRIPTION:
+            return
+        try:
+            result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
+            if result.text and result.text != last_transcription:
+                last_transcription = result.text
+                await send_transcription(websocket, result.text, is_final=False)
+        except ASRError as e:
+            logger.debug(f"增量转录失败: {e}")
 
     async def process_and_respond(query: str):
         """处理用户输入并流式响应"""
@@ -402,6 +420,10 @@ async def voice_websocket(
                         try:
                             pcm_data = base64.b64decode(message.audio_data)
                             audio_buffer.extend(pcm_data)
+                            
+                            # 触发增量转录（如果没有正在进行的转录任务）
+                            if transcription_task is None or transcription_task.done():
+                                transcription_task = asyncio.create_task(do_interim_transcription())
                         except Exception as e:
                             logger.warning(f"音频数据解码失败: {e}")
 
@@ -418,6 +440,7 @@ async def voice_websocket(
                             logger.info(f"开始语音会话: agent_id={agent_id}")
                             is_listening = True
                             audio_buffer.clear()
+                            last_transcription = ""  # 重置转录状态
                             await send_status(websocket, VoiceStatus.LISTENING)
 
                         case ControlAction.STOP:

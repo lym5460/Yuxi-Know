@@ -281,7 +281,6 @@ import AudioVisualizer from '@/components/voice/AudioVisualizer.vue'
 import { createVoiceWebSocket, sendAudio, sendControl } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
-import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 
 // ==================== PROPS & EMITS ====================
 const props = defineProps({
@@ -1066,7 +1065,7 @@ const toggleAgentPanel = () => {
 // 语音模式状态
 const voiceStatus = ref('idle')
 const voiceTranscription = ref('')
-const voiceInterimTranscript = ref('')  // 实时预览文字
+const voiceInterimTranscript = ref('')  // 实时预览文字（来自后端流式ASR）
 const voiceRecording = ref(false)
 const voiceAudioLevel = ref(0)
 const voiceMessages = ref([])
@@ -1075,28 +1074,6 @@ let voiceWs = null
 
 // 先初始化音频播放器
 const { playAudioChunk, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
-
-// 初始化浏览器语音识别（用于实时预览）
-const { 
-  isSupported: speechRecognitionSupported,
-  start: startSpeechRecognition,
-  stop: stopSpeechRecognition,
-  reset: resetSpeechRecognition
-} = useSpeechRecognition({
-  lang: 'zh-CN',
-  continuous: true,
-  interimResults: true,
-  onResult: (fullText, interim) => {
-    // 实时更新预览文字
-    voiceInterimTranscript.value = interim || fullText
-    // 滚动到底部
-    scrollVoiceMessages()
-  },
-  onFinalResult: (text) => {
-    // 浏览器识别的最终结果（仅用于预览，不作为最终结果）
-    console.log('🎤 浏览器识别结果:', text)
-  }
-})
 
 // 智能打断：当用户开始说话时立即停止 AI
 const handleSmartInterrupt = () => {
@@ -1116,7 +1093,6 @@ const handleSmartInterrupt = () => {
   
   // 重置实时预览
   voiceInterimTranscript.value = ''
-  resetSpeechRecognition()
   
   // 状态切换到监听
   voiceStatus.value = 'listening'
@@ -1133,19 +1109,9 @@ const { startCapture, stopCapture, isSpeaking: voiceIsSpeaking } = useAudioCaptu
     console.log('🎤 语音开始，当前状态:', voiceStatus.value)
     // 智能打断：只要用户开始说话，就停止音频播放
     handleSmartInterrupt()
-    
-    // 启动浏览器语音识别进行实时预览
-    if (speechRecognitionSupported.value) {
-      resetSpeechRecognition()
-      startSpeechRecognition()
-    }
   },
   onSpeechEnd: () => {
     console.log('🎤 语音结束，自动触发转录')
-    
-    // 停止浏览器语音识别
-    stopSpeechRecognition()
-    
     // VAD 检测到语音结束，自动发送 stop 触发转录
     // 只有在监听状态下才触发转录（避免在打断后立即触发）
     if (voiceRecording.value && voiceWs && voiceStatus.value === 'listening') {
@@ -1214,16 +1180,21 @@ function handleVoiceMessage(msg) {
       }
       break
     case 'transcription':
-      voiceTranscription.value = msg.text
-      if (msg.is_final && msg.text) {
-        voiceMessages.value.push({ role: 'user', content: msg.text })
+      if (msg.is_final) {
+        // 最终结果
+        if (msg.text) {
+          voiceMessages.value.push({ role: 'user', content: msg.text })
+        }
         voiceTranscription.value = ''
-        voiceInterimTranscript.value = ''  // 清除实时预览
-        resetSpeechRecognition()
+        voiceInterimTranscript.value = ''
         // 重置流式消息索引，准备接收新的 AI 回复
         currentStreamingMsgIndex.value = -1
         // 重置音频播放器，准备播放新的回复
         resetVoiceAudio()
+        scrollVoiceMessages()
+      } else {
+        // 中间结果 - 实时预览
+        voiceInterimTranscript.value = msg.text || ''
         scrollVoiceMessages()
       }
       break
@@ -1328,9 +1299,6 @@ function startVoiceRecording() {
 function stopVoiceRecording() {
   // 无条件停止音频播放
   stopVoiceAudio()
-  
-  // 停止浏览器语音识别
-  stopSpeechRecognition()
   
   if (voiceWs) sendControl(voiceWs, 'stop')
   stopCapture()
