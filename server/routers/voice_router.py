@@ -266,119 +266,124 @@ async def voice_websocket(
     is_cancelled = False  # 取消标志
     
     # 流式 ASR 状态
-    last_transcription = ""  # 上次转录结果，用于增量更新
-    transcription_task: asyncio.Task | None = None  # 转录任务
-    MIN_AUDIO_FOR_TRANSCRIPTION = 16000  # 最小音频长度（约0.5秒 @ 16kHz 16bit）
+    last_transcription = ""  # 上次转录结果
+    asr_task: asyncio.Task | None = None  # ASR 定时任务
+    MIN_AUDIO_FOR_TRANSCRIPTION = 8000  # 最小音频长度（约0.25秒）
+    ASR_INTERVAL = 0.5  # ASR 转录间隔（秒）
 
     await send_status(websocket, VoiceStatus.IDLE)
     
-    async def do_interim_transcription():
-        """执行增量转录，发送中间结果"""
+    async def periodic_asr():
+        """定时执行 ASR 转录"""
         nonlocal last_transcription
-        if len(audio_buffer) < MIN_AUDIO_FOR_TRANSCRIPTION:
-            return
-        try:
-            result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
-            if result.text and result.text != last_transcription:
-                last_transcription = result.text
-                await send_transcription(websocket, result.text, is_final=False)
-        except ASRError as e:
-            logger.debug(f"增量转录失败: {e}")
+        while is_listening:
+            await asyncio.sleep(ASR_INTERVAL)
+            if not is_listening or len(audio_buffer) < MIN_AUDIO_FOR_TRANSCRIPTION:
+                continue
+            try:
+                result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
+                if result.text and result.text != last_transcription:
+                    last_transcription = result.text
+                    await send_transcription(websocket, result.text, is_final=False)
+            except ASRError as e:
+                logger.debug(f"增量转录失败: {e}")
+            except Exception as e:
+                logger.debug(f"ASR 任务异常: {e}")
 
     async def process_and_respond(query: str):
-        """处理用户输入并流式响应"""
+        """处理用户输入并流式响应 - 优化版本
+        
+        实现真正的流式体验：
+        1. LLM 流式输出文字，立即发送到前端
+        2. TTS 在后台并行合成，音频生成后立即发送
+        """
         nonlocal is_cancelled
         
         try:
             await send_status(websocket, VoiceStatus.PROCESSING)
             
-            # 构建输入
             messages = [HumanMessage(content=query)]
             input_context = {"thread_id": thread_id, "user_id": user_id}
             
             logger.info(f"调用智能体: query={query}")
             
-            # 流式获取响应
             full_response = ""
-            sentence_buffer = ""
-            sentence_endings = {"。", "！", "？", ".", "!", "?", "\n"}
+            tts_buffer = ""
+            tts_delimiters = {"。", "！", "？", ".", "!", "?", "，", ",", "；", ";", "\n"}
+            min_tts_length = 8
+            
+            # 用于存储 TTS 任务
+            pending_tts_tasks = []
+            first_audio_sent = False
+            
+            async def synthesize_and_send(text: str):
+                """合成并发送音频"""
+                nonlocal first_audio_sent
+                if is_cancelled:
+                    return
+                clean_text = clean_text_for_tts(text)
+                if not clean_text:
+                    return
+                try:
+                    if not first_audio_sent:
+                        await send_status(websocket, VoiceStatus.SPEAKING)
+                        first_audio_sent = True
+                    audio_data = await tts_service.synthesize(
+                        text=clean_text,
+                        voice=tts_voice,
+                        speed=tts_speed,
+                    )
+                    if audio_data and not is_cancelled:
+                        await send_audio(websocket, audio_data)
+                except TTSError as e:
+                    logger.error(f"TTS 合成失败: {e}")
             
             async for msg, metadata in agent.stream_messages(messages, input_context=input_context):
-                # 在每次迭代开始时检查取消状态
                 if is_cancelled:
-                    logger.info("任务被取消，停止处理")
-                    return
+                    break
                 
-                # 只处理 AIMessageChunk 类型的消息
                 if isinstance(msg, AIMessageChunk) and msg.content:
                     chunk = msg.content
                     full_response += chunk
-                    sentence_buffer += chunk
+                    tts_buffer += chunk
                     
-                    # 再次检查取消状态
-                    if is_cancelled:
-                        return
-                    
-                    # 发送文本块
+                    # 立即发送文本
                     await send_response_chunk(websocket, chunk)
                     
-                    # 检查是否有完整句子可以合成语音
-                    while True:
-                        # 在循环中检查取消状态
-                        if is_cancelled:
-                            return
-                        
-                        end_pos = -1
-                        for i, char in enumerate(sentence_buffer):
-                            if char in sentence_endings:
-                                end_pos = i
+                    # 检查是否可以启动 TTS
+                    while len(tts_buffer) >= min_tts_length:
+                        split_pos = -1
+                        for i, char in enumerate(tts_buffer):
+                            if char in tts_delimiters:
+                                split_pos = i
                                 break
                         
-                        if end_pos == -1:
-                            break
+                        if split_pos == -1:
+                            if len(tts_buffer) > 40:
+                                split_pos = 40
+                            else:
+                                break
                         
-                        sentence = sentence_buffer[:end_pos + 1].strip()
-                        sentence_buffer = sentence_buffer[end_pos + 1:]
+                        segment = tts_buffer[:split_pos + 1].strip()
+                        tts_buffer = tts_buffer[split_pos + 1:]
                         
-                        if sentence and not is_cancelled:
-                            # 清理文本，移除 Markdown 等格式
-                            clean_sentence = clean_text_for_tts(sentence)
-                            if not clean_sentence:
-                                continue
-                            
-                            # 再次检查取消状态
-                            if is_cancelled:
-                                return
-                            
-                            # 合成并发送语音
-                            await send_status(websocket, VoiceStatus.SPEAKING)
-                            try:
-                                audio_data = await tts_service.synthesize(
-                                    text=clean_sentence,
-                                    voice=tts_voice,
-                                    speed=tts_speed,
-                                )
-                                # 合成后再次检查取消状态
-                                if audio_data and not is_cancelled:
-                                    await send_audio(websocket, audio_data)
-                            except TTSError as e:
-                                logger.error(f"TTS 合成失败: {e}")
+                        if segment:
+                            # 等待之前的 TTS 完成后再开始新的（保证顺序）
+                            if pending_tts_tasks:
+                                await pending_tts_tasks[-1]
+                            task = asyncio.create_task(synthesize_and_send(segment))
+                            pending_tts_tasks.append(task)
             
-            # 处理剩余的文本
-            if sentence_buffer.strip() and not is_cancelled:
-                clean_remaining = clean_text_for_tts(sentence_buffer.strip())
-                if clean_remaining:
-                    await send_status(websocket, VoiceStatus.SPEAKING)
-                    try:
-                        audio_data = await tts_service.synthesize(
-                            text=clean_remaining,
-                            voice=tts_voice,
-                            speed=tts_speed,
-                        )
-                        if audio_data and not is_cancelled:
-                            await send_audio(websocket, audio_data)
-                    except TTSError as e:
-                        logger.error(f"TTS 合成失败: {e}")
+            # 处理剩余文本
+            if tts_buffer.strip() and not is_cancelled:
+                if pending_tts_tasks:
+                    await pending_tts_tasks[-1]
+                task = asyncio.create_task(synthesize_and_send(tts_buffer.strip()))
+                pending_tts_tasks.append(task)
+            
+            # 等待所有 TTS 完成
+            if pending_tts_tasks:
+                await asyncio.gather(*pending_tts_tasks, return_exceptions=True)
             
             if not is_cancelled:
                 await send_response_end(websocket)
@@ -420,10 +425,6 @@ async def voice_websocket(
                         try:
                             pcm_data = base64.b64decode(message.audio_data)
                             audio_buffer.extend(pcm_data)
-                            
-                            # 触发增量转录（如果没有正在进行的转录任务）
-                            if transcription_task is None or transcription_task.done():
-                                transcription_task = asyncio.create_task(do_interim_transcription())
                         except Exception as e:
                             logger.warning(f"音频数据解码失败: {e}")
 
@@ -440,12 +441,25 @@ async def voice_websocket(
                             logger.info(f"开始语音会话: agent_id={agent_id}")
                             is_listening = True
                             audio_buffer.clear()
-                            last_transcription = ""  # 重置转录状态
+                            last_transcription = ""
+                            
+                            # 启动定时 ASR 任务
+                            if asr_task is None or asr_task.done():
+                                asr_task = asyncio.create_task(periodic_asr())
+                            
                             await send_status(websocket, VoiceStatus.LISTENING)
 
                         case ControlAction.STOP:
                             logger.info(f"停止语音会话: agent_id={agent_id}")
                             is_listening = False
+                            
+                            # 停止 ASR 定时任务
+                            if asr_task and not asr_task.done():
+                                asr_task.cancel()
+                                try:
+                                    await asr_task
+                                except asyncio.CancelledError:
+                                    pass
                             
                             # 取消之前的任务
                             cancel_current_task()
@@ -480,6 +494,7 @@ async def voice_websocket(
                             
                             # 清空音频缓冲
                             audio_buffer.clear()
+                            last_transcription = ""
                             
                             # 立即发送监听状态，让前端知道可以开始新的对话
                             await send_status(websocket, VoiceStatus.LISTENING)
@@ -487,6 +502,10 @@ async def voice_websocket(
                             # 重置取消标志，准备接收新的请求
                             is_cancelled = False
                             is_listening = True
+                            
+                            # 重启 ASR 定时任务
+                            if asr_task is None or asr_task.done():
+                                asr_task = asyncio.create_task(periodic_asr())
 
                 case ClientMessageType.CONFIG:
                     if message.config:
@@ -501,6 +520,15 @@ async def voice_websocket(
         except Exception:
             pass
     finally:
+        # 停止 ASR 任务
+        is_listening = False
+        if asr_task and not asr_task.done():
+            asr_task.cancel()
+            try:
+                await asr_task
+            except asyncio.CancelledError:
+                pass
+        
         # 取消正在执行的任务
         cancel_current_task()
         
