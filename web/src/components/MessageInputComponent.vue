@@ -63,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch, onBeforeUnmount, useSlots } from 'vue'
+import { ref, computed, onMounted, nextTick, watch, onBeforeUnmount, useSlots, Comment } from 'vue'
 import {
   SendOutlined,
   ArrowUpOutlined,
@@ -132,7 +132,9 @@ const hasOptionsLeft = computed(() => {
     return false
   }
   const renderedNodes = slot()
-  return Boolean(renderedNodes && renderedNodes.length)
+  // Filter out comment nodes (created by v-if when condition is false)
+  const validNodes = renderedNodes.filter(node => node.type !== Comment)
+  return validNodes.length > 0
 })
 
 const hasActionsLeft = computed(() => {
@@ -141,7 +143,9 @@ const hasActionsLeft = computed(() => {
     return false
   }
   const renderedNodes = slot()
-  return Boolean(renderedNodes && renderedNodes.length)
+  // Filter out comment nodes (created by v-if when condition is false)
+  const validNodes = renderedNodes.filter(node => node.type !== Comment)
+  return validNodes.length > 0
 })
 
 // 图标映射

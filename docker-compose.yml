@@ -38,6 +38,7 @@ services:
       - MINERU_OCR_URI=${MINERU_OCR_URI:-http://mineru:30000}
       - PADDLEX_URI=${PADDLEX_URI:-http://paddlex:8080}
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
+      - WHISPER_API_URL=${WHISPER_API_URL:-http://whisper:8000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
       # 清空代理配置，容器内不使用代理
@@ -296,6 +297,28 @@ services:
             - driver: nvidia
               device_ids: ['0']
               capabilities: [gpu]
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Whisper ASR 服务 (语音识别)
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: whisper-asr
+    ports:
+      - "8100:8000"
+    environment:
+      - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
+      - WHISPER__INFERENCE_DEVICE=${WHISPER_DEVICE:-auto}
+      - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+    volumes:
+      - ./models/whisper:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
     networks:
       - app-network
     restart: unless-stopped

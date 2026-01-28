@@ -802,6 +802,21 @@ wheels = [
 ]
 
 [[package]]
+name = "edge-tts"
+version = "7.2.7"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "certifi" },
+    { name = "tabulate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/16/d2/1ce38f6e4fe7275207f4033b0971db489a0b594340ae6bac2320127e71ee/edge_tts-7.2.7.tar.gz", hash = "sha256:0127fba57a742bc48ff0a2a3b24b8324f7859260185274c335b4e54735aff325", size = 27508, upload-time = "2025-12-12T20:54:28.403Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/bf/89/92ac6b154ab87d236c15e5e0c73cb99be58efb1ea3eb9318c266bf9a36bf/edge_tts-7.2.7-py3-none-any.whl", hash = "sha256:ac11d9e834347e5ee62cbe72e8a56ffd65d3c4e795be14b1e593b72cf6480dd9", size = 30556, upload-time = "2025-12-12T20:54:26.956Z" },
+]
+
+[[package]]
 name = "emoji"
 version = "2.15.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -4919,6 +4934,7 @@ dependencies = [
     { name = "deepagents" },
     { name = "docling" },
     { name = "docx2txt" },
+    { name = "edge-tts" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "json-repair" },
@@ -4996,6 +5012,7 @@ requires-dist = [
     { name = "deepagents", specifier = ">=0.2.5" },
     { name = "docling", specifier = ">=2.68.0" },
     { name = "docx2txt", specifier = ">=0.9" },
+    { name = "edge-tts", specifier = ">=6.1.0" },
     { name = "fastapi", specifier = ">=0.121" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "json-repair", specifier = ">=0.54.0" },

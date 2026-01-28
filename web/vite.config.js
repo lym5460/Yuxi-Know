@@ -36,7 +36,8 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '^/api': {
           target: env.VITE_API_URL || 'http://api:5050',
-          changeOrigin: true
+          changeOrigin: true,
+          ws: true  // 支持 WebSocket 代理
         }
       },
       watch: {
