@@ -245,10 +245,22 @@ async def voice_websocket(
     logger.info(f"语音 WebSocket 连接已建立: agent_id={agent_id}, user_id={user_id}")
 
     # 4. 从数据库加载智能体配置
+    # 语音服务配置
     asr_provider = os.getenv("VOICE_ASR_PROVIDER", "local-whisper")
     tts_provider = os.getenv("VOICE_TTS_PROVIDER", "edge-tts")
     tts_voice = os.getenv("VOICE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
     tts_speed = float(os.getenv("VOICE_TTS_SPEED", "1.0"))
+    # VAD 配置
+    vad_threshold = float(os.getenv("VOICE_VAD_THRESHOLD", "0.5"))
+    silence_duration = float(os.getenv("VOICE_SILENCE_DURATION", "0.8"))
+    # 交互配置
+    interrupt_enabled = os.getenv("VOICE_INTERRUPT_ENABLED", "true").lower() == "true"
+    interrupt_sensitivity = float(os.getenv("VOICE_INTERRUPT_SENSITIVITY", "0.5"))
+    tool_feedback_enabled = os.getenv("VOICE_TOOL_FEEDBACK_ENABLED", "true").lower() == "true"
+    tool_feedback_verbosity = os.getenv("VOICE_TOOL_FEEDBACK_VERBOSITY", "normal")
+    # 会话配置
+    session_timeout = int(os.getenv("VOICE_SESSION_TIMEOUT", "300"))
+    
     agent_config = {}  # 传递给智能体的配置
     department_id = None
 
@@ -259,20 +271,28 @@ async def voice_websocket(
             from sqlalchemy import select
             result = await db.execute(select(User.department_id).where(User.id == int(user_id)))
             department_id = result.scalar_one_or_none()
-            logger.info(f"用户 {user_id} 的部门ID: {department_id}")
             
             if department_id:
                 config_repo = AgentConfigRepository(db)
                 config_item = await config_repo.get_default(department_id=department_id, agent_id=agent_id)
-                logger.info(f"获取到配置项: {config_item}")
                 if config_item and config_item.config_json:
-                    logger.info(f"config_json: {config_item.config_json}")
                     agent_config = config_item.config_json.get("context", {})
+                    # 语音服务配置
                     asr_provider = agent_config.get("asr_provider", asr_provider)
                     tts_provider = agent_config.get("tts_provider", tts_provider)
                     tts_voice = agent_config.get("tts_voice", tts_voice)
                     tts_speed = float(agent_config.get("tts_speed", tts_speed))
-                    logger.info(f"已加载智能体配置: config_id={config_item.id}, model={agent_config.get('model')}, agent_config={agent_config}")
+                    # VAD 配置
+                    vad_threshold = float(agent_config.get("vad_threshold", vad_threshold))
+                    silence_duration = float(agent_config.get("silence_duration", silence_duration))
+                    # 交互配置
+                    interrupt_enabled = agent_config.get("interrupt_enabled", interrupt_enabled)
+                    interrupt_sensitivity = float(agent_config.get("interrupt_sensitivity", interrupt_sensitivity))
+                    tool_feedback_enabled = agent_config.get("tool_feedback_enabled", tool_feedback_enabled)
+                    tool_feedback_verbosity = agent_config.get("tool_feedback_verbosity", tool_feedback_verbosity)
+                    # 会话配置
+                    session_timeout = int(agent_config.get("session_timeout", session_timeout))
+                    logger.info(f"已加载智能体配置: model={agent_config.get('model')}")
     except Exception as e:
         logger.warning(f"加载智能体配置失败，使用默认配置: {e}")
 
@@ -292,18 +312,34 @@ async def voice_websocket(
     thread_id = str(uuid.uuid4())
     current_task: asyncio.Task | None = None  # 当前正在执行的任务
     is_cancelled = False  # 取消标志
+    last_activity_time = asyncio.get_event_loop().time()  # 最后活动时间
     
     # 流式 ASR 状态
     last_transcription = ""  # 上次转录结果
     asr_task: asyncio.Task | None = None  # ASR 定时任务
+    timeout_task: asyncio.Task | None = None  # 超时检测任务
     MIN_AUDIO_FOR_TRANSCRIPTION = 8000  # 最小音频长度（约0.25秒）
     ASR_INTERVAL = 0.5  # ASR 转录间隔（秒）
 
     await send_status(websocket, VoiceStatus.IDLE)
     
+    async def check_session_timeout():
+        """检测会话超时"""
+        nonlocal last_activity_time
+        while True:
+            await asyncio.sleep(30)  # 每30秒检查一次
+            if asyncio.get_event_loop().time() - last_activity_time > session_timeout:
+                logger.info(f"语音会话超时: agent_id={agent_id}")
+                await send_error(websocket, "会话超时，请重新连接")
+                await websocket.close()
+                break
+    
+    # 启动超时检测任务
+    timeout_task = asyncio.create_task(check_session_timeout())
+    
     async def periodic_asr():
         """定时执行 ASR 转录"""
-        nonlocal last_transcription
+        nonlocal last_transcription, last_activity_time
         while is_listening:
             await asyncio.sleep(ASR_INTERVAL)
             if not is_listening or len(audio_buffer) < MIN_AUDIO_FOR_TRANSCRIPTION:
@@ -311,8 +347,11 @@ async def voice_websocket(
             try:
                 result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
                 if result.text and result.text != last_transcription:
-                    last_transcription = result.text
-                    await send_transcription(websocket, result.text, is_final=False)
+                    # 使用 vad_threshold 判断是否为有效语音（基于置信度）
+                    if result.confidence >= vad_threshold:
+                        last_transcription = result.text
+                        last_activity_time = asyncio.get_event_loop().time()
+                        await send_transcription(websocket, result.text, is_final=False)
             except ASRError as e:
                 logger.debug(f"增量转录失败: {e}")
             except Exception as e:
@@ -470,6 +509,7 @@ async def voice_websocket(
                             # 取消之前的任务
                             cancel_current_task()
                             is_cancelled = False
+                            last_activity_time = asyncio.get_event_loop().time()
                             
                             logger.info(f"开始语音会话: agent_id={agent_id}")
                             is_listening = True
@@ -485,6 +525,7 @@ async def voice_websocket(
                         case ControlAction.STOP:
                             logger.info(f"停止语音会话: agent_id={agent_id}")
                             is_listening = False
+                            last_activity_time = asyncio.get_event_loop().time()
                             
                             # 停止 ASR 定时任务
                             if asr_task and not asr_task.done():
@@ -521,7 +562,13 @@ async def voice_websocket(
                                 await send_status(websocket, VoiceStatus.IDLE)
 
                         case ControlAction.INTERRUPT:
+                            # 检查是否启用打断功能
+                            if not interrupt_enabled:
+                                logger.debug(f"打断功能已禁用: agent_id={agent_id}")
+                                continue
+                                
                             logger.info(f"打断语音会话: agent_id={agent_id}")
+                            last_activity_time = asyncio.get_event_loop().time()
                             # 取消当前任务
                             cancel_current_task()
                             
@@ -553,6 +600,14 @@ async def voice_websocket(
         except Exception:
             pass
     finally:
+        # 停止超时检测任务
+        if timeout_task and not timeout_task.done():
+            timeout_task.cancel()
+            try:
+                await timeout_task
+            except asyncio.CancelledError:
+                pass
+        
         # 停止 ASR 任务
         is_listening = False
         if asr_task and not asr_task.done():
