@@ -18,8 +18,10 @@ from pydantic import BaseModel, ValidationError
 
 from server.utils.auth_utils import AuthUtils
 from src.agents import agent_manager
+from src.repositories.agent_config_repository import AgentConfigRepository
 from src.services.voice.asr_service import ASRError, create_asr_service
 from src.services.voice.tts_service import TTSError, create_tts_service
+from src.storage.postgres.manager import pg_manager
 from src.utils.logging_config import logger
 
 
@@ -242,11 +244,37 @@ async def voice_websocket(
     await websocket.accept()
     logger.info(f"语音 WebSocket 连接已建立: agent_id={agent_id}, user_id={user_id}")
 
-    # 4. 初始化服务
+    # 4. 从数据库加载智能体配置
     asr_provider = os.getenv("VOICE_ASR_PROVIDER", "local-whisper")
     tts_provider = os.getenv("VOICE_TTS_PROVIDER", "edge-tts")
     tts_voice = os.getenv("VOICE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
     tts_speed = float(os.getenv("VOICE_TTS_SPEED", "1.0"))
+    agent_config = {}  # 传递给智能体的配置
+    department_id = None
+
+    # 尝试从数据库加载用户配置
+    try:
+        async with pg_manager.get_async_session_context() as db:
+            from src.storage.postgres.models_business import User
+            from sqlalchemy import select
+            result = await db.execute(select(User.department_id).where(User.id == int(user_id)))
+            department_id = result.scalar_one_or_none()
+            logger.info(f"用户 {user_id} 的部门ID: {department_id}")
+            
+            if department_id:
+                config_repo = AgentConfigRepository(db)
+                config_item = await config_repo.get_default(department_id=department_id, agent_id=agent_id)
+                logger.info(f"获取到配置项: {config_item}")
+                if config_item and config_item.config_json:
+                    logger.info(f"config_json: {config_item.config_json}")
+                    agent_config = config_item.config_json.get("context", {})
+                    asr_provider = agent_config.get("asr_provider", asr_provider)
+                    tts_provider = agent_config.get("tts_provider", tts_provider)
+                    tts_voice = agent_config.get("tts_voice", tts_voice)
+                    tts_speed = float(agent_config.get("tts_speed", tts_speed))
+                    logger.info(f"已加载智能体配置: config_id={config_item.id}, model={agent_config.get('model')}, agent_config={agent_config}")
+    except Exception as e:
+        logger.warning(f"加载智能体配置失败，使用默认配置: {e}")
 
     try:
         asr_service = create_asr_service(asr_provider)
@@ -303,7 +331,12 @@ async def voice_websocket(
             await send_status(websocket, VoiceStatus.PROCESSING)
             
             messages = [HumanMessage(content=query)]
-            input_context = {"thread_id": thread_id, "user_id": user_id}
+            input_context = {
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "department_id": department_id,
+                "agent_config": agent_config,
+            }
             
             logger.info(f"调用智能体: query={query}")
             
