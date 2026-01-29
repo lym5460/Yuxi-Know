@@ -3,7 +3,7 @@
 继承 BaseAgent，添加语音交互能力。
 """
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRetryMiddleware
@@ -18,6 +18,7 @@ from src.services.mcp_service import get_tools_from_all_servers
 from src.utils.logging_config import logger
 
 from .context import VoiceContext
+
 
 class VoiceAgent(BaseAgent):
     """语音智能体，继承 BaseAgent 的所有能力，添加语音交互支持"""

@@ -96,7 +96,10 @@
           </div>
         </template>
         <template #content>
-          <a-empty v-if="graph.graphData.nodes.length === 0 && !graph.fetching" style="padding: 4rem 0;"/>
+          <a-empty
+            v-if="graph.graphData.nodes.length === 0 && !graph.fetching"
+            style="padding: 4rem 0"
+          />
         </template>
       </GraphCanvas>
       <!-- 详情浮动卡片 -->
@@ -233,8 +236,8 @@ const modelMatched = computed(
 const router = useRouter()
 const graphRef = ref(null)
 const graphInfo = ref(null)
-const fileList = ref([]);
-const sampleNodeCount = ref(1500); // 默认查询 1500 个节点
+const fileList = ref([])
+const sampleNodeCount = ref(1500) // 默认查询 1500 个节点
 
 const graph = reactive(useGraph(graphRef))
 
@@ -418,11 +421,12 @@ const loadSampleNodes = () => {
 
   graph.fetching = true
 
-  unifiedApi.getSubgraph({
-    db_id: state.selectedDbId,
-    node_label: '*',
-    max_nodes: maxNodes
-  })
+  unifiedApi
+    .getSubgraph({
+      db_id: state.selectedDbId,
+      node_label: '*',
+      max_nodes: maxNodes
+    })
     .then((data) => {
       // Normalize data structure if needed
       const result = data.data
@@ -451,11 +455,12 @@ const onSearch = () => {
 
   state.searchLoading = true
 
-  unifiedApi.getSubgraph({
-    db_id: state.selectedDbId,
-    node_label: state.searchInput || '*',
-    max_nodes: maxNodes
-  })
+  unifiedApi
+    .getSubgraph({
+      db_id: state.selectedDbId,
+      node_label: state.searchInput || '*',
+      max_nodes: maxNodes
+    })
     .then((data) => {
       const result = data.data
       if (!result || !result.nodes || !result.edges) {

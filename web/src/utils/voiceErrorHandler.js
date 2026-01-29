@@ -1,6 +1,6 @@
 /**
  * 语音错误处理
- * 
+ *
  * ASR/TTS 不可用时的降级处理和网络错误提示
  * Validates: Requirements 11.1, 11.2, 11.3
  */
@@ -23,7 +23,7 @@ export function handleVoiceError(error, type = VoiceErrorType.UNKNOWN) {
     [VoiceErrorType.PERMISSION_DENIED]: '请允许麦克风权限以使用语音功能',
     [VoiceErrorType.UNKNOWN]: '发生未知错误，请稍后重试'
   }
-  
+
   message.error(messages[type] || messages[VoiceErrorType.UNKNOWN])
   console.error(`Voice error [${type}]:`, error)
 }

@@ -280,7 +280,7 @@ const goToLogin = () => {
 }
 
 const openDocs = () => {
-  message.info('请联系管理员获取使用文档');
+  message.info('请联系管理员获取使用文档')
 }
 
 const toggleTheme = () => {

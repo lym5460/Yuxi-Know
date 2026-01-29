@@ -4,11 +4,11 @@
       <span class="status-indicator" :class="status"></span>
       <span class="status-text">{{ statusText }}</span>
     </div>
-    
+
     <div class="transcription" v-if="transcription">
       {{ transcription }}
     </div>
-    
+
     <VoiceControls
       :is-recording="isRecording"
       :is-playing="isPlaying"
@@ -78,7 +78,9 @@ function startVoice() {
   if (!ws) {
     ws = createVoiceWebSocket(props.agentId, {
       onMessage: handleMessage,
-      onClose: () => { ws = null }
+      onClose: () => {
+        ws = null
+      }
     })
   }
   sendControl(ws, 'start')
@@ -123,10 +125,16 @@ onUnmounted(() => {
   height: 12px;
   border-radius: 50%;
   background: var(--color-text-quaternary);
-  
-  &.listening { background: var(--color-success); }
-  &.processing { background: var(--color-warning); }
-  &.speaking { background: var(--color-primary); }
+
+  &.listening {
+    background: var(--color-success);
+  }
+  &.processing {
+    background: var(--color-warning);
+  }
+  &.speaking {
+    background: var(--color-primary);
+  }
 }
 
 .transcription {

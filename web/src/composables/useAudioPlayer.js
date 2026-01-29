@@ -1,6 +1,6 @@
 /**
  * 音频播放 Composable
- * 
+ *
  * 使用 Web Audio API 实现 PCM 流式播放
  * 豆包 TTS 返回 PCM 格式：24kHz, 16bit, 单声道, 小端序
  */
@@ -31,7 +31,7 @@ export function useAudioPlayer() {
     const samples = pcmData.length / 2
     const float32 = new Float32Array(samples)
     const view = new DataView(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength)
-    
+
     for (let i = 0; i < samples; i++) {
       const int16 = view.getInt16(i * 2, true) // little-endian
       float32[i] = int16 / 32768
@@ -44,34 +44,34 @@ export function useAudioPlayer() {
 
     try {
       const ctx = getAudioContext()
-      
+
       // 解码 base64
       const binaryString = atob(audioDataB64)
       const pcmData = new Uint8Array(binaryString.length)
       for (let i = 0; i < binaryString.length; i++) {
         pcmData[i] = binaryString.charCodeAt(i)
       }
-      
+
       // 转换为 Float32
       const float32Data = pcmToFloat32(pcmData)
-      
+
       // 创建 AudioBuffer
       const audioBuffer = ctx.createBuffer(1, float32Data.length, 24000)
       audioBuffer.getChannelData(0).set(float32Data)
-      
+
       // 创建 BufferSource 并调度播放
       const source = ctx.createBufferSource()
       source.buffer = audioBuffer
       source.connect(ctx.destination)
-      
+
       // 计算开始时间，确保无缝衔接
       const startTime = Math.max(ctx.currentTime, nextStartTime)
       source.start(startTime)
       nextStartTime = startTime + audioBuffer.duration
-      
+
       scheduledSources.push(source)
       isPlaying.value = true
-      
+
       source.onended = () => {
         const idx = scheduledSources.indexOf(source)
         if (idx > -1) scheduledSources.splice(idx, 1)
@@ -91,7 +91,7 @@ export function useAudioPlayer() {
 
   function stop() {
     isStopped = true
-    
+
     // 停止所有已调度的音频
     for (const source of scheduledSources) {
       try {

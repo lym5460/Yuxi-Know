@@ -229,7 +229,7 @@ class DoubaoRealtimeClient:
             logger.debug(f"正在连接豆包 Realtime: {self.WS_URL}")
             self.ws = await websockets.connect(self.WS_URL, additional_headers=headers, ping_interval=30)
             self.connect_id = headers["X-Api-Connect-Id"]
-            logger.debug(f"WebSocket 连接已建立，发送 StartConnection")
+            logger.debug("WebSocket 连接已建立，发送 StartConnection")
 
             # 发送 StartConnection
             frame = self._build_event_frame(EventID.START_CONNECTION)
