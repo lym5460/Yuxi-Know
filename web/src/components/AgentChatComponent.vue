@@ -1688,7 +1688,7 @@ const voiceMessagesContainer = ref(null)
 let voiceWs = null
 
 // 先初始化音频播放器
-const { playAudioChunk, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
+const { playAudioChunk, flush: flushVoiceAudio, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
 
 // 智能打断：当用户开始说话时立即停止 AI
 const handleSmartInterrupt = () => {
@@ -1720,25 +1720,8 @@ const { startCapture, stopCapture, isSpeaking: voiceIsSpeaking } = useAudioCaptu
   onAudioLevel: (level) => {
     voiceAudioLevel.value = level
   },
-  onSpeechStart: () => {
-    console.log('🎤 语音开始，当前状态:', voiceStatus.value)
-    // 智能打断：只要用户开始说话，就停止音频播放
-    handleSmartInterrupt()
-  },
-  onSpeechEnd: () => {
-    console.log('🎤 语音结束，自动触发转录')
-    // VAD 检测到语音结束，自动发送 stop 触发转录
-    // 只有在监听状态下才触发转录（避免在打断后立即触发）
-    if (voiceRecording.value && voiceWs && voiceStatus.value === 'listening') {
-      sendControl(voiceWs, 'stop')
-      voiceStatus.value = 'processing'
-    }
-  },
-  // VAD 配置
-  vadEnabled: true,
-  vadThreshold: 0.08,    // 语音检测阈值（提高以过滤噪音）
-  vadSilenceMs: 600,     // 静音 600ms 后认为语音结束
-  vadPrefixMs: 200       // 保留语音开始前 200ms 的音频
+  // 禁用前端 VAD，让豆包端到端处理
+  vadEnabled: false
 })
 
 const voiceStatusText = computed(() => {
@@ -1774,15 +1757,18 @@ const currentStreamingMsgIndex = ref(-1)
 function handleVoiceMessage(msg) {
   switch (msg.type) {
     case 'status':
+      // 如果已挂断（不在录音），忽略 listening 状态
+      if (!voiceRecording.value && msg.status === 'listening') {
+        break
+      }
       voiceStatus.value = msg.status
       // 当状态变为 idle 且正在录音中，自动重新开始监听
       if (msg.status === 'idle' && voiceRecording.value) {
         sendControl(voiceWs, 'start')
         voiceStatus.value = 'listening'
       }
-      // 当状态变为 listening 时，重置音频播放器和打断状态
+      // 当状态变为 listening 时，重置打断状态（但不重置音频播放器）
       if (msg.status === 'listening') {
-        resetVoiceAudio()
         // 重置打断状态，允许接收新的消息
         if (currentStreamingMsgIndex.value === -2) {
           currentStreamingMsgIndex.value = -1
@@ -1804,8 +1790,6 @@ function handleVoiceMessage(msg) {
         voiceInterimTranscript.value = ''
         // 重置流式消息索引，准备接收新的 AI 回复
         currentStreamingMsgIndex.value = -1
-        // 重置音频播放器，准备播放新的回复
-        resetVoiceAudio()
         scrollVoiceMessages()
       } else {
         // 中间结果 - 实时预览
@@ -1840,17 +1824,8 @@ function handleVoiceMessage(msg) {
       }
       break
     case 'audio_end':
-      // 音频播放结束，如果还在录音模式，切换回监听
-      if (voiceRecording.value) {
-        voiceStatus.value = 'listening'
-        sendControl(voiceWs, 'start')
-        // 重置打断状态
-        if (currentStreamingMsgIndex.value === -2) {
-          currentStreamingMsgIndex.value = -1
-        }
-      } else {
-        voiceStatus.value = 'idle'
-      }
+      // 音频接收完成（PCM 流式播放不需要 flush）
+      // 不改变状态，等待后端发送 status 消息
       break
     case 'error':
       console.error('Voice error:', msg.error)
@@ -1912,18 +1887,26 @@ function startVoiceRecording() {
 }
 
 function stopVoiceRecording() {
-  // 无条件停止音频播放
-  stopVoiceAudio()
-  
-  if (voiceWs) sendControl(voiceWs, 'stop')
+  // 停止音频采集
   stopCapture()
+  // 停止音频播放
+  stopVoiceAudio()
+  // 重置音频播放器
+  resetVoiceAudio()
+  // 设置打断状态，忽略后续的文字和音频
+  currentStreamingMsgIndex.value = -2
+  
   voiceRecording.value = false
   voiceTranscription.value = ''
   voiceInterimTranscript.value = ''
   
-  if (voiceStatus.value === 'listening') {
-    voiceStatus.value = 'processing'
+  // 关闭 WebSocket 连接
+  if (voiceWs) {
+    voiceWs.close()
+    voiceWs = null
   }
+  
+  voiceStatus.value = 'idle'
 }
 
 function toggleVoiceRecording() {

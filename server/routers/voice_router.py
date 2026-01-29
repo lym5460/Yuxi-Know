@@ -1,26 +1,21 @@
 """
-语音交互 WebSocket 路由器
+语音交互 WebSocket 路由器 - 豆包端到端模式
 
-实现语音智能体的 WebSocket 通信端点，支持双向音频流传输。
-支持流式输出、打断和取消功能。
+使用豆包 Realtime API 实现语音到语音的实时对话。
 """
 
 import asyncio
 import base64
 import os
-import re
 import uuid
-from enum import Enum
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
-from langchain.messages import AIMessageChunk, HumanMessage
 from pydantic import BaseModel, ValidationError
 
 from server.utils.auth_utils import AuthUtils
 from src.agents import agent_manager
 from src.repositories.agent_config_repository import AgentConfigRepository
-from src.services.voice.asr_service import ASRError, create_asr_service
-from src.services.voice.tts_service import TTSError, create_tts_service
+from src.services.voice.doubao_realtime import DoubaoConfig, DoubaoRealtimeClient, EventID
 from src.storage.postgres.manager import pg_manager
 from src.utils.logging_config import logger
 
@@ -30,40 +25,24 @@ from src.utils.logging_config import logger
 # =============================================================================
 
 
-class ClientMessageType(str, Enum):
-    """客户端消息类型"""
+class ClientMessageType(str):
     AUDIO = "audio"
     CONTROL = "control"
-    CONFIG = "config"
 
 
-class ControlAction(str, Enum):
-    """控制动作类型"""
+class ControlAction(str):
     START = "start"
     STOP = "stop"
     INTERRUPT = "interrupt"
 
 
-class VoiceConfigMessage(BaseModel):
-    """语音配置消息"""
-    asr_provider: str | None = None
-    tts_provider: str | None = None
-    tts_voice: str | None = None
-    tts_speed: float | None = None
-    vad_threshold: float | None = None
-    interrupt_enabled: bool | None = None
-
-
 class ClientMessage(BaseModel):
-    """客户端发送的消息"""
-    type: ClientMessageType
+    type: str
     audio_data: str | None = None
-    action: ControlAction | None = None
-    config: VoiceConfigMessage | None = None
+    action: str | None = None
 
 
-class ServerMessageType(str, Enum):
-    """服务端消息类型"""
+class ServerMessageType(str):
     TRANSCRIPTION = "transcription"
     RESPONSE = "response"
     RESPONSE_END = "response_end"
@@ -71,11 +50,9 @@ class ServerMessageType(str, Enum):
     AUDIO_END = "audio_end"
     STATUS = "status"
     ERROR = "error"
-    TOOL_CALL = "tool_call"
 
 
-class VoiceStatus(str, Enum):
-    """语音会话状态"""
+class VoiceStatus(str):
     LISTENING = "listening"
     PROCESSING = "processing"
     SPEAKING = "speaking"
@@ -83,12 +60,11 @@ class VoiceStatus(str, Enum):
 
 
 class ServerMessage(BaseModel):
-    """服务端发送的消息"""
-    type: ServerMessageType
+    type: str
     text: str | None = None
     is_final: bool | None = None
     audio_data: str | None = None
-    status: VoiceStatus | None = None
+    status: str | None = None
     error: str | None = None
 
 
@@ -98,7 +74,6 @@ class ServerMessage(BaseModel):
 
 
 def validate_token(token: str | None) -> dict | None:
-    """验证 WebSocket 连接的 token"""
     if not token:
         return None
     try:
@@ -107,106 +82,31 @@ def validate_token(token: str | None) -> dict | None:
         return None
 
 
-def parse_client_message(data: dict) -> ClientMessage:
-    """解析并验证客户端消息"""
-    return ClientMessage.model_validate(data)
-
-
 async def send_message(websocket: WebSocket, msg: ServerMessage) -> None:
-    """发送消息到客户端"""
     await websocket.send_json(msg.model_dump(exclude_none=True))
 
 
 async def send_error(websocket: WebSocket, error_message: str) -> None:
-    """发送错误消息"""
     await send_message(websocket, ServerMessage(type=ServerMessageType.ERROR, error=error_message))
 
 
-async def send_status(websocket: WebSocket, voice_status: VoiceStatus) -> None:
-    """发送状态消息"""
+async def send_status(websocket: WebSocket, voice_status: str) -> None:
     await send_message(websocket, ServerMessage(type=ServerMessageType.STATUS, status=voice_status))
 
 
 async def send_transcription(websocket: WebSocket, text: str, is_final: bool = False) -> None:
-    """发送转录结果"""
     await send_message(websocket, ServerMessage(type=ServerMessageType.TRANSCRIPTION, text=text, is_final=is_final))
 
 
 async def send_response_chunk(websocket: WebSocket, text: str) -> None:
-    """发送流式响应文本块"""
     await send_message(websocket, ServerMessage(type=ServerMessageType.RESPONSE, text=text))
 
 
-async def send_response_end(websocket: WebSocket) -> None:
-    """发送响应结束标记"""
-    await send_message(websocket, ServerMessage(type=ServerMessageType.RESPONSE_END))
-
-
 async def send_audio(websocket: WebSocket, audio_data: bytes) -> None:
-    """发送音频数据"""
-    await send_message(websocket, ServerMessage(
-        type=ServerMessageType.AUDIO,
-        audio_data=base64.b64encode(audio_data).decode("utf-8"),
-    ))
-
-
-async def send_audio_end(websocket: WebSocket) -> None:
-    """发送音频结束标记"""
-    await send_message(websocket, ServerMessage(type=ServerMessageType.AUDIO_END))
-
-
-def clean_text_for_tts(text: str) -> str:
-    """清理文本，移除不适合 TTS 朗读的格式
-
-    移除 Markdown 格式、HTML 标签、emoji 等，
-    使文本更适合语音合成。
-    """
-    if not text:
-        return text
-
-    # 移除代码块 ```...```
-    text = re.sub(r"```[\s\S]*?```", "", text)
-
-    # 移除行内代码 `...`
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-
-    # 移除 Markdown 链接 [text](url) -> text
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-
-    # 移除 Markdown 图片 ![alt](url)
-    text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
-
-    # 移除 HTML 标签
-    text = re.sub(r"<[^>]+>", "", text)
-
-    # 移除 Markdown 加粗 **text** 或 __text__
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"__([^_]+)__", r"\1", text)
-
-    # 移除 Markdown 斜体 *text* 或 _text_
-    text = re.sub(r"\*([^*]+)\*", r"\1", text)
-    text = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"\1", text)
-
-    # 移除 Markdown 标题 # ## ### 等
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
-
-    # 移除 Markdown 列表符号 - * + 和数字列表
-    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
-
-    # 移除 Markdown 引用 >
-    text = re.sub(r"^\s*>\s*", "", text, flags=re.MULTILINE)
-
-    # 移除 Markdown 分隔线 --- *** ___
-    text = re.sub(r"^[-*_]{3,}\s*$", "", text, flags=re.MULTILINE)
-
-    # 移除多余的空行
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # 移除首尾空白
-    text = text.strip()
-
-    return text
+    await send_message(
+        websocket,
+        ServerMessage(type=ServerMessageType.AUDIO, audio_data=base64.b64encode(audio_data).decode("utf-8")),
+    )
 
 
 # =============================================================================
@@ -222,7 +122,7 @@ async def voice_websocket(
     agent_id: str,
     token: str | None = Query(default=None),
 ):
-    """语音交互 WebSocket 端点"""
+    """语音交互 WebSocket 端点 - 豆包端到端模式"""
     # 1. 验证 token
     payload = validate_token(token)
     if payload is None:
@@ -244,352 +144,277 @@ async def voice_websocket(
     await websocket.accept()
     logger.info(f"语音 WebSocket 连接已建立: agent_id={agent_id}, user_id={user_id}")
 
-    # 4. 从数据库加载智能体配置
-    # 语音服务配置
-    asr_provider = os.getenv("VOICE_ASR_PROVIDER", "local-whisper")
-    tts_provider = os.getenv("VOICE_TTS_PROVIDER", "edge-tts")
-    tts_voice = os.getenv("VOICE_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
-    tts_speed = float(os.getenv("VOICE_TTS_SPEED", "1.0"))
-    # VAD 配置
-    vad_threshold = float(os.getenv("VOICE_VAD_THRESHOLD", "0.5"))
-    silence_duration = float(os.getenv("VOICE_SILENCE_DURATION", "0.8"))
-    # 交互配置
-    interrupt_enabled = os.getenv("VOICE_INTERRUPT_ENABLED", "true").lower() == "true"
-    interrupt_sensitivity = float(os.getenv("VOICE_INTERRUPT_SENSITIVITY", "0.5"))
-    tool_feedback_enabled = os.getenv("VOICE_TOOL_FEEDBACK_ENABLED", "true").lower() == "true"
-    tool_feedback_verbosity = os.getenv("VOICE_TOOL_FEEDBACK_VERBOSITY", "normal")
-    # 会话配置
-    session_timeout = int(os.getenv("VOICE_SESSION_TIMEOUT", "300"))
-    
-    agent_config = {}  # 传递给智能体的配置
-    department_id = None
+    # 4. 加载配置
+    # 从环境变量获取豆包 API 凭证
+    doubao_app_id = os.getenv("DOUBAO_APP_ID", "")
+    doubao_access_key = os.getenv("DOUBAO_ACCESS_KEY", "")
 
-    # 尝试从数据库加载用户配置
+    if not doubao_app_id or not doubao_access_key:
+        await send_error(websocket, "豆包 API 凭证未配置，请设置 DOUBAO_APP_ID 和 DOUBAO_ACCESS_KEY 环境变量")
+        await websocket.close()
+        return
+
+    # 默认配置
+    doubao_model = "O"
+    doubao_voice = "zh_female_vv_jupiter_bigtts"
+    bot_name = "语析助手"
+    system_role = "你是一个友好的智能助手，擅长回答各种问题。回答要简洁明了，适合语音播报。"
+    speaking_style = ""
+    silence_duration_ms = 1500
+    interrupt_enabled = True
+    session_timeout = 300
+    knowledges = []
+
+    # 从数据库加载用户配置
     try:
         async with pg_manager.get_async_session_context() as db:
-            from src.storage.postgres.models_business import User
             from sqlalchemy import select
+
+            from src.storage.postgres.models_business import User
+
             result = await db.execute(select(User.department_id).where(User.id == int(user_id)))
             department_id = result.scalar_one_or_none()
-            
+
             if department_id:
                 config_repo = AgentConfigRepository(db)
                 config_item = await config_repo.get_default(department_id=department_id, agent_id=agent_id)
                 if config_item and config_item.config_json:
-                    agent_config = config_item.config_json.get("context", {})
-                    # 语音服务配置
-                    asr_provider = agent_config.get("asr_provider", asr_provider)
-                    tts_provider = agent_config.get("tts_provider", tts_provider)
-                    tts_voice = agent_config.get("tts_voice", tts_voice)
-                    tts_speed = float(agent_config.get("tts_speed", tts_speed))
-                    # VAD 配置
-                    vad_threshold = float(agent_config.get("vad_threshold", vad_threshold))
-                    silence_duration = float(agent_config.get("silence_duration", silence_duration))
-                    # 交互配置
-                    interrupt_enabled = agent_config.get("interrupt_enabled", interrupt_enabled)
-                    interrupt_sensitivity = float(agent_config.get("interrupt_sensitivity", interrupt_sensitivity))
-                    tool_feedback_enabled = agent_config.get("tool_feedback_enabled", tool_feedback_enabled)
-                    tool_feedback_verbosity = agent_config.get("tool_feedback_verbosity", tool_feedback_verbosity)
-                    # 会话配置
-                    session_timeout = int(agent_config.get("session_timeout", session_timeout))
-                    logger.info(f"已加载智能体配置: model={agent_config.get('model')}")
+                    ctx = config_item.config_json.get("context", {})
+                    doubao_model = ctx.get("doubao_model", doubao_model)
+                    doubao_voice = ctx.get("doubao_voice", doubao_voice)
+                    bot_name = ctx.get("bot_name", bot_name)
+                    system_role = ctx.get("system_role", system_role)
+                    speaking_style = ctx.get("speaking_style", speaking_style)
+                    silence_duration_ms = ctx.get("silence_duration_ms", silence_duration_ms)
+                    interrupt_enabled = ctx.get("interrupt_enabled", interrupt_enabled)
+                    session_timeout = ctx.get("session_timeout", session_timeout)
+                    knowledges = ctx.get("knowledges", [])
+                    logger.info(f"已加载智能体配置: model={doubao_model}, voice={doubao_voice}")
     except Exception as e:
         logger.warning(f"加载智能体配置失败，使用默认配置: {e}")
 
-    try:
-        asr_service = create_asr_service(asr_provider)
-        tts_service = create_tts_service(tts_provider)
-        logger.info(f"服务已初始化: ASR={asr_provider}, TTS={tts_provider}")
-    except Exception as e:
-        logger.error(f"服务初始化失败: {e}")
-        await send_error(websocket, f"服务初始化失败: {e}")
-        await websocket.close()
-        return
+    # 5. 创建豆包客户端
+    config = DoubaoConfig(
+        app_id=doubao_app_id,
+        access_key=doubao_access_key,
+        model=doubao_model,
+        voice=doubao_voice,
+        bot_name=bot_name,
+        system_role=system_role,
+        speaking_style=speaking_style,
+        end_smooth_window_ms=silence_duration_ms,
+    )
+    doubao_client = DoubaoRealtimeClient(config)
 
-    # 5. 会话状态
-    audio_buffer = bytearray()
+    # 6. 会话状态
     is_listening = False
-    thread_id = str(uuid.uuid4())
-    current_task: asyncio.Task | None = None  # 当前正在执行的任务
-    is_cancelled = False  # 取消标志
-    last_activity_time = asyncio.get_event_loop().time()  # 最后活动时间
-    
-    # 流式 ASR 状态
-    last_transcription = ""  # 上次转录结果
-    asr_task: asyncio.Task | None = None  # ASR 定时任务
-    timeout_task: asyncio.Task | None = None  # 超时检测任务
-    MIN_AUDIO_FOR_TRANSCRIPTION = 8000  # 最小音频长度（约0.25秒）
-    ASR_INTERVAL = 0.5  # ASR 转录间隔（秒）
+    dialog_id = str(uuid.uuid4())
+    last_activity_time = asyncio.get_event_loop().time()
+    receive_task: asyncio.Task | None = None
+    timeout_task: asyncio.Task | None = None
+    current_question_id: str | None = None
 
     await send_status(websocket, VoiceStatus.IDLE)
-    
+
     async def check_session_timeout():
         """检测会话超时"""
         nonlocal last_activity_time
         while True:
-            await asyncio.sleep(30)  # 每30秒检查一次
+            await asyncio.sleep(30)
             if asyncio.get_event_loop().time() - last_activity_time > session_timeout:
                 logger.info(f"语音会话超时: agent_id={agent_id}")
                 await send_error(websocket, "会话超时，请重新连接")
                 await websocket.close()
                 break
-    
-    # 启动超时检测任务
-    timeout_task = asyncio.create_task(check_session_timeout())
-    
-    async def periodic_asr():
-        """定时执行 ASR 转录"""
-        nonlocal last_transcription, last_activity_time
-        while is_listening:
-            await asyncio.sleep(ASR_INTERVAL)
-            if not is_listening or len(audio_buffer) < MIN_AUDIO_FOR_TRANSCRIPTION:
+
+    async def handle_doubao_events():
+        """处理豆包服务端事件"""
+        nonlocal current_question_id, is_listening
+
+        while doubao_client.is_connected:
+            result = await doubao_client.receive()
+            if result is None:
                 continue
-            try:
-                result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
-                if result.text and result.text != last_transcription:
-                    # 使用 vad_threshold 判断是否为有效语音（基于置信度）
-                    if result.confidence >= vad_threshold:
-                        last_transcription = result.text
-                        last_activity_time = asyncio.get_event_loop().time()
-                        await send_transcription(websocket, result.text, is_final=False)
-            except ASRError as e:
-                logger.debug(f"增量转录失败: {e}")
-            except Exception as e:
-                logger.debug(f"ASR 任务异常: {e}")
 
-    async def process_and_respond(query: str):
-        """处理用户输入并流式响应 - 优化版本
-        
-        实现真正的流式体验：
-        1. LLM 流式输出文字，立即发送到前端
-        2. TTS 在后台并行合成，音频生成后立即发送
-        """
-        nonlocal is_cancelled
-        
-        try:
-            await send_status(websocket, VoiceStatus.PROCESSING)
-            
-            messages = [HumanMessage(content=query)]
-            input_context = {
-                "thread_id": thread_id,
-                "user_id": user_id,
-                "department_id": department_id,
-                "agent_config": agent_config,
-            }
-            
-            logger.info(f"调用智能体: query={query}")
-            
-            full_response = ""
-            tts_buffer = ""
-            tts_delimiters = {"。", "！", "？", ".", "!", "?", "，", ",", "；", ";", "\n"}
-            min_tts_length = 8
-            
-            # 用于存储 TTS 任务
-            pending_tts_tasks = []
-            first_audio_sent = False
-            
-            async def synthesize_and_send(text: str):
-                """合成并发送音频"""
-                nonlocal first_audio_sent
-                if is_cancelled:
-                    return
-                clean_text = clean_text_for_tts(text)
-                if not clean_text:
-                    return
-                try:
-                    if not first_audio_sent:
-                        await send_status(websocket, VoiceStatus.SPEAKING)
-                        first_audio_sent = True
-                    audio_data = await tts_service.synthesize(
-                        text=clean_text,
-                        voice=tts_voice,
-                        speed=tts_speed,
-                    )
-                    if audio_data and not is_cancelled:
+            event_id = result.get("event_id")
+            payload = result.get("payload", {})
+
+            match event_id:
+                case EventID.ASR_INFO:
+                    # 检测到用户开始说话，可用于打断
+                    current_question_id = payload.get("question_id")
+                    if interrupt_enabled:
+                        await send_status(websocket, VoiceStatus.LISTENING)
+
+                case EventID.ASR_RESPONSE:
+                    # ASR 识别结果
+                    results = payload.get("results", [])
+                    for r in results:
+                        text = r.get("text", "")
+                        is_interim = r.get("is_interim", True)
+                        if text:
+                            await send_transcription(websocket, text, is_final=not is_interim)
+
+                case EventID.ASR_ENDED:
+                    # 用户说话结束
+                    logger.info("用户说话结束")
+                    await send_status(websocket, VoiceStatus.PROCESSING)
+
+                    # 如果配置了知识库，执行检索并发送 RAG 结果
+                    if knowledges and current_question_id:
+                        await do_rag_retrieval(doubao_client, knowledges)
+
+                case EventID.TTS_SENTENCE_START:
+                    # TTS 开始合成
+                    text = payload.get("text", "")
+                    if text:
+                        await send_response_chunk(websocket, text)
+                    await send_status(websocket, VoiceStatus.SPEAKING)
+
+                case EventID.TTS_RESPONSE:
+                    # TTS 音频数据
+                    audio_data = result.get("audio_data")
+                    if audio_data:
+                        logger.debug(f"收到 TTS 音频: {len(audio_data)} bytes, 前16字节: {audio_data[:16].hex()}")
                         await send_audio(websocket, audio_data)
-                except TTSError as e:
-                    logger.error(f"TTS 合成失败: {e}")
-            
-            async for msg, metadata in agent.stream_messages(messages, input_context=input_context):
-                if is_cancelled:
-                    break
-                
-                if isinstance(msg, AIMessageChunk) and msg.content:
-                    chunk = msg.content
-                    full_response += chunk
-                    tts_buffer += chunk
-                    
-                    # 立即发送文本
-                    await send_response_chunk(websocket, chunk)
-                    
-                    # 检查是否可以启动 TTS
-                    while len(tts_buffer) >= min_tts_length:
-                        split_pos = -1
-                        for i, char in enumerate(tts_buffer):
-                            if char in tts_delimiters:
-                                split_pos = i
-                                break
-                        
-                        if split_pos == -1:
-                            if len(tts_buffer) > 40:
-                                split_pos = 40
-                            else:
-                                break
-                        
-                        segment = tts_buffer[:split_pos + 1].strip()
-                        tts_buffer = tts_buffer[split_pos + 1:]
-                        
-                        if segment:
-                            # 等待之前的 TTS 完成后再开始新的（保证顺序）
-                            if pending_tts_tasks:
-                                await pending_tts_tasks[-1]
-                            task = asyncio.create_task(synthesize_and_send(segment))
-                            pending_tts_tasks.append(task)
-            
-            # 处理剩余文本
-            if tts_buffer.strip() and not is_cancelled:
-                if pending_tts_tasks:
-                    await pending_tts_tasks[-1]
-                task = asyncio.create_task(synthesize_and_send(tts_buffer.strip()))
-                pending_tts_tasks.append(task)
-            
-            # 等待所有 TTS 完成
-            if pending_tts_tasks:
-                await asyncio.gather(*pending_tts_tasks, return_exceptions=True)
-            
-            if not is_cancelled:
-                await send_response_end(websocket)
-                await send_audio_end(websocket)
-                logger.info(f"响应完成: {len(full_response)} 字符")
-            
-        except asyncio.CancelledError:
-            logger.info("任务被取消")
-        except Exception as e:
-            logger.error(f"处理失败: {e}")
-            if not is_cancelled:
-                await send_error(websocket, f"处理失败: {e}")
-        finally:
-            if not is_cancelled:
-                await send_status(websocket, VoiceStatus.IDLE)
 
-    def cancel_current_task():
-        """取消当前任务"""
-        nonlocal current_task, is_cancelled
-        if current_task and not current_task.done():
-            is_cancelled = True
-            current_task.cancel()
-            logger.info("已取消当前任务")
+                case EventID.TTS_ENDED:
+                    # TTS 结束
+                    await send_message(websocket, ServerMessage(type=ServerMessageType.AUDIO_END))
+                    await send_message(websocket, ServerMessage(type=ServerMessageType.RESPONSE_END))
+                    await send_status(websocket, VoiceStatus.IDLE if not is_listening else VoiceStatus.LISTENING)
+
+                case EventID.CHAT_RESPONSE:
+                    # 模型回复文本
+                    content = payload.get("content", "")
+                    if content:
+                        await send_response_chunk(websocket, content)
+
+                case EventID.SESSION_FAILED | EventID.DIALOG_COMMON_ERROR:
+                    # 错误
+                    error_msg = payload.get("error") or payload.get("message", "未知错误")
+                    logger.error(f"豆包会话错误: {error_msg}")
+                    await send_error(websocket, f"语音服务错误: {error_msg}")
+
+    async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_names: list[str]):
+        """执行知识库检索并发送结果"""
+        # 获取最后的 ASR 文本作为查询
+        # 注意：这里简化处理，实际应该从 ASR_RESPONSE 中累积完整文本
+        try:
+            from src.knowledge import knowledge_base
+
+            retrievers = knowledge_base.get_retrievers()
+            rag_results = []
+
+            for kb_id, kb_info in retrievers.items():
+                if kb_info["name"] in kb_names:
+                    # 使用最近的 query（这里需要从 ASR 结果中获取）
+                    # 暂时跳过，因为需要在 ASR_RESPONSE 中累积文本
+                    pass
+
+            if rag_results:
+                await client.send_rag_text(rag_results)
+        except Exception as e:
+            logger.warning(f"RAG 检索失败: {e}")
+
+    # 启动超时检测
+    timeout_task = asyncio.create_task(check_session_timeout())
 
     try:
         while True:
             raw_data = await websocket.receive_json()
 
             try:
-                message = parse_client_message(raw_data)
+                message = ClientMessage.model_validate(raw_data)
             except ValidationError as e:
                 logger.warning(f"无效的消息格式: {e}")
                 await send_error(websocket, f"无效的消息格式: {e}")
                 continue
 
-            match message.type:
-                case ClientMessageType.AUDIO:
-                    if message.audio_data and is_listening:
-                        try:
-                            pcm_data = base64.b64decode(message.audio_data)
-                            audio_buffer.extend(pcm_data)
-                        except Exception as e:
-                            logger.warning(f"音频数据解码失败: {e}")
+            last_activity_time = asyncio.get_event_loop().time()
 
-                case ClientMessageType.CONTROL:
-                    if not message.action:
+            if message.type == ClientMessageType.AUDIO:
+                # 转发音频到豆包（持续发送，让豆包自己处理 VAD）
+                if message.audio_data and doubao_client.is_connected and doubao_client.session_id:
+                    try:
+                        pcm_data = base64.b64decode(message.audio_data)
+                        await doubao_client.send_audio(pcm_data)
+                    except Exception as e:
+                        logger.warning(f"音频数据处理失败: {e}")
+
+            elif message.type == ClientMessageType.CONTROL:
+                if message.action == ControlAction.START:
+                    logger.info(f"开始语音会话: agent_id={agent_id}")
+
+                    # 如果已有会话在运行，直接复用，不重新创建
+                    if doubao_client.is_connected and doubao_client.session_id:
+                        is_listening = True
+                        await send_status(websocket, VoiceStatus.LISTENING)
+                        # 确保接收任务在运行
+                        if receive_task is None or receive_task.done():
+                            receive_task = asyncio.create_task(handle_doubao_events())
                         continue
 
-                    match message.action:
-                        case ControlAction.START:
-                            # 取消之前的任务
-                            cancel_current_task()
-                            is_cancelled = False
-                            last_activity_time = asyncio.get_event_loop().time()
-                            
-                            logger.info(f"开始语音会话: agent_id={agent_id}")
-                            is_listening = True
-                            audio_buffer.clear()
-                            last_transcription = ""
-                            
-                            # 启动定时 ASR 任务
-                            if asr_task is None or asr_task.done():
-                                asr_task = asyncio.create_task(periodic_asr())
-                            
-                            await send_status(websocket, VoiceStatus.LISTENING)
+                    # 先取消已有的接收任务，避免 recv 冲突
+                    if receive_task and not receive_task.done():
+                        receive_task.cancel()
+                        try:
+                            await receive_task
+                        except asyncio.CancelledError:
+                            pass
 
-                        case ControlAction.STOP:
-                            logger.info(f"停止语音会话: agent_id={agent_id}")
+                    # 连接豆包
+                    if not doubao_client.is_connected:
+                        if not await doubao_client.connect():
+                            await send_error(websocket, "连接豆包服务失败")
+                            continue
+
+                    # 如果已有会话，先结束
+                    if doubao_client.session_id:
+                        await doubao_client.finish_session(wait_for_confirmation=True)
+
+                    # 启动会话
+                    session_id = await doubao_client.start_session(dialog_id)
+                    if not session_id:
+                        await send_error(websocket, "启动豆包会话失败")
+                        continue
+
+                    is_listening = True
+                    await send_status(websocket, VoiceStatus.LISTENING)
+
+                    # 启动事件处理任务
+                    receive_task = asyncio.create_task(handle_doubao_events())
+
+                elif message.action == ControlAction.STOP:
+                    logger.info(f"停止语音会话: agent_id={agent_id}")
+                    is_listening = False
+                    # 不结束豆包会话，让它继续处理并返回结果
+
+                elif message.action == ControlAction.INTERRUPT:
+                    if interrupt_enabled:
+                        logger.info(f"打断语音会话: agent_id={agent_id}")
+                        # 先取消接收任务
+                        if receive_task and not receive_task.done():
+                            receive_task.cancel()
+                            try:
+                                await receive_task
+                            except asyncio.CancelledError:
+                                pass
+
+                        # 结束当前会话（等待服务端确认）
+                        if doubao_client.session_id:
+                            await doubao_client.finish_session(wait_for_confirmation=True)
+
+                        # 重新启动会话
+                        session_id = await doubao_client.start_session(dialog_id)
+                        if session_id:
+                            is_listening = True
+                            await send_status(websocket, VoiceStatus.LISTENING)
+                            # 重新启动接收任务
+                            receive_task = asyncio.create_task(handle_doubao_events())
+                        else:
+                            await send_error(websocket, "重新启动会话失败")
                             is_listening = False
-                            last_activity_time = asyncio.get_event_loop().time()
-                            
-                            # 停止 ASR 定时任务
-                            if asr_task and not asr_task.done():
-                                asr_task.cancel()
-                                try:
-                                    await asr_task
-                                except asyncio.CancelledError:
-                                    pass
-                            
-                            # 取消之前的任务
-                            cancel_current_task()
-                            is_cancelled = False
-
-                            if len(audio_buffer) > 0:
-                                try:
-                                    # ASR 转录
-                                    result = await asr_service.transcribe(bytes(audio_buffer), language="auto")
-                                    audio_buffer.clear()
-
-                                    if result.text:
-                                        await send_transcription(websocket, result.text, is_final=True)
-                                        logger.info(f"转录结果: {result.text}")
-                                        
-                                        # 启动新任务处理响应
-                                        current_task = asyncio.create_task(process_and_respond(result.text))
-                                    else:
-                                        await send_transcription(websocket, "", is_final=True)
-                                        await send_status(websocket, VoiceStatus.IDLE)
-                                except ASRError as e:
-                                    logger.error(f"ASR 转录失败: {e}")
-                                    await send_error(websocket, f"语音识别失败: {e}")
-                                    await send_status(websocket, VoiceStatus.IDLE)
-                            else:
-                                await send_status(websocket, VoiceStatus.IDLE)
-
-                        case ControlAction.INTERRUPT:
-                            # 检查是否启用打断功能
-                            if not interrupt_enabled:
-                                logger.debug(f"打断功能已禁用: agent_id={agent_id}")
-                                continue
-                                
-                            logger.info(f"打断语音会话: agent_id={agent_id}")
-                            last_activity_time = asyncio.get_event_loop().time()
-                            # 取消当前任务
-                            cancel_current_task()
-                            
-                            # 清空音频缓冲
-                            audio_buffer.clear()
-                            last_transcription = ""
-                            
-                            # 立即发送监听状态，让前端知道可以开始新的对话
-                            await send_status(websocket, VoiceStatus.LISTENING)
-                            
-                            # 重置取消标志，准备接收新的请求
-                            is_cancelled = False
-                            is_listening = True
-                            
-                            # 重启 ASR 定时任务
-                            if asr_task is None or asr_task.done():
-                                asr_task = asyncio.create_task(periodic_asr())
-
-                case ClientMessageType.CONFIG:
-                    if message.config:
-                        logger.info(f"更新语音配置: {message.config.model_dump(exclude_none=True)}")
 
     except WebSocketDisconnect:
         logger.info(f"语音 WebSocket 连接已断开: agent_id={agent_id}")
@@ -600,27 +425,10 @@ async def voice_websocket(
         except Exception:
             pass
     finally:
-        # 停止超时检测任务
+        # 清理资源
         if timeout_task and not timeout_task.done():
             timeout_task.cancel()
-            try:
-                await timeout_task
-            except asyncio.CancelledError:
-                pass
-        
-        # 停止 ASR 任务
-        is_listening = False
-        if asr_task and not asr_task.done():
-            asr_task.cancel()
-            try:
-                await asr_task
-            except asyncio.CancelledError:
-                pass
-        
-        # 取消正在执行的任务
-        cancel_current_task()
-        
-        # 清理资源
-        if hasattr(asr_service, "close"):
-            await asr_service.close()
+        if receive_task and not receive_task.done():
+            receive_task.cancel()
+        await doubao_client.close()
         logger.info(f"语音 WebSocket 连接清理完成: agent_id={agent_id}")

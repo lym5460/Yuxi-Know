@@ -42,7 +42,7 @@ const { isCapturing, startCapture, stopCapture } = useAudioCapture({
   }
 })
 
-const { isPlaying, playAudioChunk, stop: stopAudio } = useAudioPlayer()
+const { isPlaying, playAudioChunk, flush: flushAudio, stop: stopAudio } = useAudioPlayer()
 
 const statusText = computed(() => {
   const texts = {
@@ -64,6 +64,9 @@ function handleMessage(msg) {
       break
     case 'audio':
       if (msg.audio_data) playAudioChunk(msg.audio_data)
+      break
+    case 'audio_end':
+      flushAudio()
       break
     case 'error':
       console.error('Voice error:', msg.error)
