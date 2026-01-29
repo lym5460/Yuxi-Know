@@ -1,9 +1,8 @@
 /**
  * 音频播放 Composable
  * 
- * 使用 Web Audio API 播放音频，实现流式音频缓冲
- * 支持立即停止播放（用于智能打断）
- * Validates: Requirements 2.8, 9.6
+ * 使用 Web Audio API 实现 PCM 流式播放
+ * 豆包 TTS 返回 PCM 格式：24kHz, 16bit, 单声道, 小端序
  */
 
 import { ref, onUnmounted } from 'vue'
@@ -13,117 +12,102 @@ export function useAudioPlayer() {
   const error = ref(null)
 
   let audioContext = null
-  let audioQueue = []
-  let isProcessing = false
-  let currentSource = null  // 当前正在播放的音频源
-  let isStopped = false     // 停止标志
+  let nextStartTime = 0
+  let isStopped = false
+  let scheduledSources = []
 
-  function initContext() {
+  function getAudioContext() {
     if (!audioContext) {
-      audioContext = new AudioContext()
+      audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 })
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
     }
     return audioContext
   }
 
-  async function playAudioChunk(audioDataB64) {
-    // 如果已停止，忽略新的音频
-    if (isStopped) return
+  function pcmToFloat32(pcmData) {
+    // PCM 16bit 小端序转 Float32
+    const samples = pcmData.length / 2
+    const float32 = new Float32Array(samples)
+    const view = new DataView(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength)
     
+    for (let i = 0; i < samples; i++) {
+      const int16 = view.getInt16(i * 2, true) // little-endian
+      float32[i] = int16 / 32768
+    }
+    return float32
+  }
+
+  function playAudioChunk(audioDataB64) {
+    if (isStopped) return
+
     try {
-      initContext()
+      const ctx = getAudioContext()
       
       // 解码 base64
       const binaryString = atob(audioDataB64)
-      const bytes = new Uint8Array(binaryString.length)
+      const pcmData = new Uint8Array(binaryString.length)
       for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i)
+        pcmData[i] = binaryString.charCodeAt(i)
       }
       
-      // 添加到队列
-      audioQueue.push(bytes.buffer)
+      // 转换为 Float32
+      const float32Data = pcmToFloat32(pcmData)
       
-      // 处理队列
-      if (!isProcessing) {
-        processQueue()
+      // 创建 AudioBuffer
+      const audioBuffer = ctx.createBuffer(1, float32Data.length, 24000)
+      audioBuffer.getChannelData(0).set(float32Data)
+      
+      // 创建 BufferSource 并调度播放
+      const source = ctx.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(ctx.destination)
+      
+      // 计算开始时间，确保无缝衔接
+      const startTime = Math.max(ctx.currentTime, nextStartTime)
+      source.start(startTime)
+      nextStartTime = startTime + audioBuffer.duration
+      
+      scheduledSources.push(source)
+      isPlaying.value = true
+      
+      source.onended = () => {
+        const idx = scheduledSources.indexOf(source)
+        if (idx > -1) scheduledSources.splice(idx, 1)
+        if (scheduledSources.length === 0) {
+          isPlaying.value = false
+        }
       }
     } catch (e) {
       error.value = e.message
+      console.error('音频播放失败:', e)
     }
   }
 
-  async function processQueue() {
-    if (isProcessing || audioQueue.length === 0 || isStopped) return
-    
-    isProcessing = true
-    isPlaying.value = true
-
-    while (audioQueue.length > 0 && !isStopped) {
-      const buffer = audioQueue.shift()
-      try {
-        const ctx = initContext()
-        const audioBuffer = await ctx.decodeAudioData(buffer.slice(0))
-        
-        // 如果在解码过程中被停止，退出
-        if (isStopped) break
-        
-        const source = ctx.createBufferSource()
-        source.buffer = audioBuffer
-        source.connect(ctx.destination)
-        
-        // 保存当前音频源引用，以便可以停止
-        currentSource = source
-        
-        await new Promise((resolve) => {
-          source.onended = () => {
-            if (currentSource === source) {
-              currentSource = null
-            }
-            resolve()
-          }
-          source.start()
-        })
-      } catch (e) {
-        // 如果是因为停止导致的错误，忽略
-        if (!isStopped) {
-          console.error('Failed to play audio chunk:', e)
-        }
-      }
-    }
-
-    isProcessing = false
-    if (!isStopped) {
-      isPlaying.value = false
-    }
+  function flush() {
+    // PCM 流式播放不需要 flush，每个 chunk 都是独立的
   }
 
   function stop() {
-    // 设置停止标志
     isStopped = true
     
-    // 清空队列
-    audioQueue = []
-    
-    // 停止当前正在播放的音频
-    if (currentSource) {
+    // 停止所有已调度的音频
+    for (const source of scheduledSources) {
       try {
-        currentSource.stop()
-        currentSource.disconnect()
-      } catch (e) {
-        // 忽略已经停止的音频源错误
+        source.stop()
+      } catch {
+        // 忽略已停止的错误
       }
-      currentSource = null
     }
-    
-    isProcessing = false
+    scheduledSources = []
+    nextStartTime = 0
     isPlaying.value = false
-    
-    console.log('🔇 音频播放已停止')
   }
 
   function reset() {
-    // 重置停止标志，允许新的音频播放
+    stop()
     isStopped = false
-    console.log('🔊 音频播放器已重置，准备接收新音频')
   }
 
   function cleanup() {
@@ -142,6 +126,7 @@ export function useAudioPlayer() {
     isPlaying,
     error,
     playAudioChunk,
+    flush,
     stop,
     reset,
     cleanup

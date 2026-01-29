@@ -137,29 +137,22 @@ export function useAudioCapture(options = {}) {
             // 发送当前音频
             onAudioChunk?.(base64)
           } else {
-            // 静音
+            // 静音 - 始终发送音频，让后端/豆包处理 VAD
+            onAudioChunk?.(base64)
+            
             if (speechDetected) {
               // 正在说话中遇到静音
               if (!silenceStart) {
                 silenceStart = now
               }
               
-              // 继续发送音频（可能是短暂停顿）
-              onAudioChunk?.(base64)
-              
               // 检查是否静音足够长
               if (now - silenceStart > vadSilenceMs) {
-                // 语音结束
+                // 语音结束，触发回调但继续发送音频
                 speechDetected = false
                 isSpeaking.value = false
                 silenceStart = null
                 onSpeechEnd?.()
-              }
-            } else {
-              // 还没开始说话，缓存音频
-              audioBuffer.push(base64)
-              if (audioBuffer.length > maxBufferSize) {
-                audioBuffer.shift()
               }
             }
           }

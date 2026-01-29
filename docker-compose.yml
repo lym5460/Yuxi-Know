@@ -305,12 +305,15 @@ services:
   whisper:
     image: fedirz/faster-whisper-server:latest-cuda
     container_name: whisper-asr
+    profiles:
+      - all
     ports:
       - "8100:8000"
     environment:
       - WHISPER__MODEL=${WHISPER_MODEL:-Systran/faster-whisper-small}
       - WHISPER__INFERENCE_DEVICE=${WHISPER_DEVICE:-auto}
       - WHISPER__COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      - WHISPER__TTL=${WHISPER_MODEL_TTL:-3600}
       - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
     volumes:
       - ./models/whisper:/root/.cache/huggingface
