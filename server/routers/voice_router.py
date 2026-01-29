@@ -12,7 +12,6 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_required_user
 from server.utils.auth_utils import AuthUtils
@@ -255,6 +254,17 @@ async def voice_websocket(
     except Exception as e:
         logger.warning(f"加载智能体配置失败，使用默认配置: {e}")
 
+    # 如果配置了知识库，在 system_role 中添加约束
+    if knowledges:
+        kb_constraint = (
+            "你需要基于知识库中的内容回答问题。"
+            "如果知识库中没有相关信息，请诚实地说'抱歉，我没有找到相关信息'，不要编造答案。"
+        )
+        if system_role:
+            system_role = f"{system_role} {kb_constraint}"
+        else:
+            system_role = kb_constraint
+
     # 5. 创建豆包客户端
     config = DoubaoConfig(
         app_id=doubao_app_id,
@@ -276,6 +286,8 @@ async def voice_websocket(
     timeout_task: asyncio.Task | None = None
     current_question_id: str | None = None
     current_asr_text: str = ""  # 累积 ASR 识别文本用于 RAG 检索
+    rag_sent: bool = False  # 当前轮次是否已发送 RAG
+    current_tts_type: str = ""  # 当前 TTS 类型，用于过滤闲聊回复
 
     await send_status(websocket, VoiceStatus.IDLE)
 
@@ -292,7 +304,7 @@ async def voice_websocket(
 
     async def handle_doubao_events():
         """处理豆包服务端事件"""
-        nonlocal current_question_id, is_listening, current_asr_text
+        nonlocal current_question_id, is_listening, current_asr_text, rag_sent, current_tts_type
 
         while doubao_client.is_connected:
             result = await doubao_client.receive()
@@ -307,6 +319,8 @@ async def voice_websocket(
                     # 检测到用户开始说话，可用于打断
                     current_question_id = payload.get("question_id")
                     current_asr_text = ""  # 重置 ASR 文本
+                    rag_sent = False  # 重置 RAG 发送状态
+                    current_tts_type = ""  # 重置 TTS 类型
                     if interrupt_enabled:
                         await send_status(websocket, VoiceStatus.LISTENING)
 
@@ -329,30 +343,53 @@ async def voice_websocket(
 
                     # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
                     if knowledges and current_asr_text:
-                        await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
+                        rag_sent = await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
 
                 case EventID.TTS_SENTENCE_START:
                     # TTS 开始合成
+                    tts_type = payload.get("tts_type", "default")
+                    current_tts_type = tts_type
                     text = payload.get("text", "")
+
+                    # 如果配置了知识库且已发送 RAG，忽略闲聊回复（default），
+                    # 但允许过渡语（chat_tts_text）和 RAG 回复（external_rag）播放
+                    if knowledges and rag_sent and tts_type == "default":
+                        logger.debug(f"忽略闲聊回复 (tts_type={tts_type})，等待 RAG 回复")
+                        continue
+
+                    logger.info(f"TTS 开始: tts_type={tts_type}, text={text[:50] if text else ''}")
                     if text:
                         await send_response_chunk(websocket, text)
                     await send_status(websocket, VoiceStatus.SPEAKING)
 
                 case EventID.TTS_RESPONSE:
                     # TTS 音频数据
+                    # 如果当前是闲聊回复且已发送 RAG，忽略音频
+                    if knowledges and rag_sent and current_tts_type == "default":
+                        continue
+
                     audio_data = result.get("audio_data")
                     if audio_data:
-                        logger.debug(f"收到 TTS 音频: {len(audio_data)} bytes, 前16字节: {audio_data[:16].hex()}")
+                        logger.debug(f"收到 TTS 音频: {len(audio_data)} bytes")
                         await send_audio(websocket, audio_data)
 
                 case EventID.TTS_ENDED:
                     # TTS 结束
+                    # 如果当前是闲聊回复且已发送 RAG，忽略结束事件
+                    if knowledges and rag_sent and current_tts_type == "default":
+                        logger.debug("忽略闲聊回复的 TTS_ENDED 事件")
+                        continue
+
                     await send_message(websocket, ServerMessage(type=ServerMessageType.AUDIO_END))
                     await send_message(websocket, ServerMessage(type=ServerMessageType.RESPONSE_END))
                     await send_status(websocket, VoiceStatus.IDLE if not is_listening else VoiceStatus.LISTENING)
 
                 case EventID.CHAT_RESPONSE:
                     # 模型回复文本
+                    # 如果当前是闲聊回复且已发送 RAG，忽略
+                    if knowledges and rag_sent and current_tts_type == "default":
+                        continue
+
                     content = payload.get("content", "")
                     if content:
                         await send_response_chunk(websocket, content)
@@ -363,52 +400,132 @@ async def voice_websocket(
                     logger.error(f"豆包会话错误: {error_msg}")
                     await send_error(websocket, f"语音服务错误: {error_msg}")
 
-    async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_ids: list[str], query: str):
+    async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_names: list[str], query: str) -> bool:
         """执行知识库检索并发送结果给豆包
 
         Args:
             client: 豆包客户端
-            kb_ids: 知识库 ID 列表
+            kb_names: 知识库名称列表
             query: 用户查询文本
+
+        Returns:
+            是否成功发送了 RAG 结果
         """
-        if not query or not kb_ids:
-            return
+        if not query or not kb_names:
+            return False
+
+        # 相关性分数阈值，低于此值的结果视为不相关
+        RELEVANCE_THRESHOLD = 0.5
 
         try:
             from src.knowledge import knowledge_base
+            from src.repositories.knowledge_base_repository import KnowledgeBaseRepository
 
             rag_results = []
 
-            for kb_id in kb_ids:
+            # 获取所有知识库，建立名称到 ID 的映射
+            kb_repo = KnowledgeBaseRepository()
+            all_kbs = await kb_repo.get_all()
+            name_to_id = {kb.name: kb.db_id for kb in all_kbs}
+
+            for kb_name in kb_names:
+                # 通过名称查找 ID
+                kb_id = name_to_id.get(kb_name)
+                if not kb_id:
+                    logger.warning(f"知识库 '{kb_name}' 不存在")
+                    continue
+
                 try:
                     # 执行知识库检索
                     results = await knowledge_base.aquery(query, kb_id, top_k=3)
+                    logger.debug(f"知识库 {kb_name} 检索结果类型: {type(results)}")
 
-                    # 转换为豆包 RAG 格式
-                    for i, result in enumerate(results):
-                        if isinstance(result, dict):
-                            content = result.get("content") or result.get("text", "")
-                            title = result.get("title") or result.get("filename") or f"文档片段 {i + 1}"
-                        else:
-                            content = str(result)
-                            title = f"文档片段 {i + 1}"
+                    # 处理不同类型的返回结果
+                    if isinstance(results, list):
+                        # Milvus 返回 list[dict]，每个 dict 包含 content, metadata, score
+                        for i, result in enumerate(results):
+                            if isinstance(result, dict):
+                                content = result.get("content") or result.get("text", "")
+                                metadata = result.get("metadata", {})
+                                title = metadata.get("source") or result.get("title") or f"文档片段 {i + 1}"
+                                # 检查相关性分数（Milvus 返回的是距离，需要转换）
+                                score = result.get("score", 0)
+                                # Milvus 使用 L2 距离，分数越小越相关，转换为相似度
+                                # 或者使用 IP/COSINE，分数越大越相关
+                                # 这里假设返回的是相似度分数（0-1，越大越相关）
+                                logger.debug(f"RAG 结果 {i}: score={score}, title={title[:30]}")
+                                if score < RELEVANCE_THRESHOLD:
+                                    logger.debug(f"跳过低相关性结果: score={score} < {RELEVANCE_THRESHOLD}")
+                                    continue
+                            else:
+                                content = str(result)
+                                title = f"文档片段 {i + 1}"
 
-                        if content:
-                            rag_results.append({"title": title, "content": content})
+                            if content:
+                                rag_results.append({"title": title, "content": content})
+                                logger.debug(f"添加 RAG 结果: title={title[:30]}, content={content[:50]}...")
+
+                    elif isinstance(results, dict):
+                        # LightRAG 返回 dict，包含 status, data 等字段
+                        data = results.get("data", {}) or {}
+                        chunks = data.get("chunks", [])
+                        entities = data.get("entities", [])
+
+                        # 优先使用 chunks
+                        for i, chunk in enumerate(chunks):
+                            if isinstance(chunk, dict):
+                                content = chunk.get("content") or chunk.get("text", "")
+                                title = chunk.get("source") or chunk.get("title") or f"文档片段 {i + 1}"
+                            else:
+                                content = str(chunk)
+                                title = f"文档片段 {i + 1}"
+
+                            if content:
+                                rag_results.append({"title": title, "content": content})
+                                logger.debug(f"添加 RAG 结果 (chunk): title={title[:30]}, content={content[:50]}...")
+
+                        # 如果没有 chunks，使用 entities
+                        if not chunks and entities:
+                            for i, entity in enumerate(entities):
+                                if isinstance(entity, dict):
+                                    name = entity.get("entity_name", "")
+                                    desc = entity.get("description", "")
+                                    content = f"{name}: {desc}" if name and desc else name or desc
+                                    title = f"知识点 {i + 1}"
+                                else:
+                                    content = str(entity)
+                                    title = f"知识点 {i + 1}"
+
+                                if content:
+                                    rag_results.append({"title": title, "content": content})
+                                    logger.debug(f"添加 RAG 结果 (entity): title={title}, content={content[:50]}...")
+
+                    elif isinstance(results, str) and results:
+                        # 如果返回的是字符串，直接使用
+                        rag_results.append({"title": f"知识库 {kb_name}", "content": results})
+                        logger.debug(f"添加 RAG 结果 (str): content={results[:50]}...")
 
                 except Exception as e:
-                    logger.warning(f"知识库 {kb_id} 检索失败: {e}")
+                    logger.warning(f"知识库 {kb_name} ({kb_id}) 检索失败: {e}")
                     continue
 
             # 发送 RAG 结果给豆包
             if rag_results:
                 logger.info(f"发送 RAG 结果: {len(rag_results)} 条")
                 await client.send_rag_text(rag_results)
+                return True
             else:
-                logger.debug("RAG 检索无结果")
+                # 无相关结果，发送"未找到信息"的提示，让 AI 据此回复
+                logger.info("RAG 检索无相关结果，发送未找到信息提示")
+                await client.send_rag_text([{
+                    "title": "检索结果",
+                    "content": "知识库中没有找到与用户问题相关的信息。请告诉用户：抱歉，我没有找到相关信息。"
+                }])
+                return True
 
         except Exception as e:
             logger.warning(f"RAG 检索失败: {e}")
+            return False
 
     # 启动超时检测
     timeout_task = asyncio.create_task(check_session_timeout())
