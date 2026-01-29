@@ -29,7 +29,7 @@ export const unifiedApi = {
    * @returns {Promise} - 子图数据
    */
   getSubgraph: async (params) => {
-    const { db_id, node_label = "*", max_depth = 2, max_nodes = null } = params
+    const { db_id, node_label = '*', max_depth = 2, max_nodes = null } = params
 
     if (!db_id) {
       throw new Error('db_id is required')
@@ -40,7 +40,7 @@ export const unifiedApi = {
       node_label: node_label,
       max_depth: max_depth.toString()
     })
-    
+
     // 仅当 max_nodes 有值时才添加参数（null 表示不限制）
     if (max_nodes !== null && max_nodes !== undefined) {
       queryParams.append('max_nodes', max_nodes.toString())

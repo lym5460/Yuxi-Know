@@ -9,23 +9,12 @@
     >
       <template #icon><AudioOutlined /></template>
     </a-button>
-    
-    <a-button
-      v-else
-      type="primary"
-      danger
-      shape="circle"
-      size="large"
-      @click="$emit('stop')"
-    >
+
+    <a-button v-else type="primary" danger shape="circle" size="large" @click="$emit('stop')">
       <template #icon><PauseOutlined /></template>
     </a-button>
-    
-    <a-button
-      v-if="isPlaying"
-      shape="circle"
-      @click="$emit('interrupt')"
-    >
+
+    <a-button v-if="isPlaying" shape="circle" @click="$emit('interrupt')">
       <template #icon><StopOutlined /></template>
     </a-button>
   </div>

@@ -144,10 +144,7 @@ provide('settingsModal', {
           </a-tooltip>
         </div>
       </div>
-      <div
-        ref="htmlRefHook"
-        class="fill debug-trigger"
-      ></div>
+      <div ref="htmlRefHook" class="fill debug-trigger"></div>
       <!-- 用户信息组件 -->
       <div class="nav-item user-info">
         <UserInfoComponent />

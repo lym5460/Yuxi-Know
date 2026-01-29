@@ -31,29 +31,39 @@ export const useInfoStore = defineStore('info', () => {
   )
 
   // 计算属性 - 功能特性
-  const features = computed(() => infoConfig.value.features || [{
-    label: "知识库数量",
-    value: "100+",
-    description: "支持多个知识库并行管理",
-    icon: "default"
-  }, {
-    label: "智能体类型",
-    value: "4+",
-    description: "多种智能体满足不同场景需求",
-    icon: "resolved"
-  }, {
-    label: "文档处理",
-    value: "高效",
-    description: "支持多种文档格式智能解析",
-    icon: "commits"
-  }])
+  const features = computed(
+    () =>
+      infoConfig.value.features || [
+        {
+          label: '知识库数量',
+          value: '100+',
+          description: '支持多个知识库并行管理',
+          icon: 'default'
+        },
+        {
+          label: '智能体类型',
+          value: '4+',
+          description: '多种智能体满足不同场景需求',
+          icon: 'resolved'
+        },
+        {
+          label: '文档处理',
+          value: '高效',
+          description: '支持多种文档格式智能解析',
+          icon: 'commits'
+        }
+      ]
+  )
 
   const actions = computed(() => infoConfig.value.actions || [])
 
   // 计算属性 - 页脚信息
-  const footer = computed(() => infoConfig.value.footer || {
-    copyright: "© 上海曼恒数字技术股份有限公司 2025"
-  })
+  const footer = computed(
+    () =>
+      infoConfig.value.footer || {
+        copyright: '© 上海曼恒数字技术股份有限公司 2025'
+      }
+  )
 
   // 动作方法
   function setInfoConfig(newConfig) {

@@ -2,11 +2,7 @@
   <div class="graph-canvas-container" ref="rootEl">
     <!-- WebGL 不支持警告 -->
     <div v-if="!webglSupported" class="webgl-error">
-      <a-alert
-        type="warning"
-        message="您的浏览器不支持 WebGL，无法渲染 3D 图谱"
-        show-icon
-      />
+      <a-alert type="warning" message="您的浏览器不支持 WebGL，无法渲染 3D 图谱" show-icon />
     </div>
     <!-- 加载状态 -->
     <div v-if="loading && webglSupported" class="loading-overlay">
@@ -24,7 +20,11 @@
       </div>
     </div>
     <!-- 自定义 Tooltip -->
-    <div v-if="tooltipVisible" class="custom-tooltip" :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }">
+    <div
+      v-if="tooltipVisible"
+      class="custom-tooltip"
+      :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+    >
       {{ tooltipContent }}
     </div>
     <div class="graph-canvas" ref="container"></div>
@@ -63,7 +63,7 @@
 <script setup>
 /**
  * GraphCanvas - 3D 知识图谱可视化组件
- * 
+ *
  * 融合 3d-force-graph 官方示例的功能：
  * - text-nodes: 使用 SpriteText 显示节点文本
  * - text-links: 使用 SpriteText 显示边文本
@@ -97,13 +97,7 @@ const props = defineProps({
   sizeByDegree: { type: Boolean, default: true }
 })
 
-const emit = defineEmits([
-  'ready',
-  'data-rendered',
-  'node-click',
-  'edge-click',
-  'canvas-click'
-])
+const emit = defineEmits(['ready', 'data-rendered', 'node-click', 'edge-click', 'canvas-click'])
 
 const container = ref(null)
 const rootEl = ref(null)
@@ -148,8 +142,8 @@ function checkWebGLSupport() {
  * 检查节点是否匹配搜索关键词
  */
 function shouldHighlightNode(node) {
-  return props.highlightKeywords?.some(kw =>
-    kw.trim() !== '' && node.name.toLowerCase().includes(kw.toLowerCase())
+  return props.highlightKeywords?.some(
+    (kw) => kw.trim() !== '' && node.name.toLowerCase().includes(kw.toLowerCase())
   )
 }
 
@@ -158,11 +152,11 @@ function shouldHighlightNode(node) {
  */
 function formatData() {
   const data = props.graphData || { nodes: [], edges: [] }
-  
+
   // 计算节点度数
   const degrees = new Map()
-  data.nodes.forEach(n => degrees.set(String(n.id), 0))
-  data.edges.forEach(e => {
+  data.nodes.forEach((n) => degrees.set(String(n.id), 0))
+  data.edges.forEach((e) => {
     const s = String(e.source_id)
     const t = String(e.target_id)
     degrees.set(s, (degrees.get(s) || 0) + 1)
@@ -193,8 +187,8 @@ function formatData() {
   }))
 
   // 建立节点邻居关系（参考 highlight 示例）
-  const nodeMap = new Map(nodes.map(n => [n.id, n]))
-  links.forEach(link => {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+  links.forEach((link) => {
     const a = nodeMap.get(link.source)
     const b = nodeMap.get(link.target)
     if (a && b) {
@@ -224,13 +218,15 @@ function initGraph() {
 
   // 清理旧实例
   if (graphInstance) {
-    try { graphInstance._destructor() } catch (e) {}
+    try {
+      graphInstance._destructor()
+    } catch (e) {}
     graphInstance = null
   }
   container.value.innerHTML = ''
 
   const isDark = themeStore.isDark
-  
+
   // 检测节点数量，决定是否显示 3D 文本标签
   const nodeCount = (props.graphData?.nodes || []).length
   const showNodeLabels = nodeCount <= 2000
@@ -246,12 +242,12 @@ function initGraph() {
     // 节点自动着色
     .nodeAutoColorBy('group')
     // 节点 tooltip（始终启用，参考 large-graph 示例）
-    .nodeLabel(node => node.name)
+    .nodeLabel((node) => node.name)
 
   // 1. text-nodes 示例：使用 SpriteText 显示节点文本（仅小数据集 ≤ 2000）
   if (showNodeLabels) {
     graphInstance
-      .nodeThreeObject(node => {
+      .nodeThreeObject((node) => {
         const sprite = new SpriteText(node.name)
         sprite.material.depthWrite = false // 背景透明
         sprite.color = node.color || (isDark ? '#e0e0e0' : '#333333')
@@ -261,7 +257,7 @@ function initGraph() {
       })
       .nodeThreeObjectExtend(true) // 保留原始节点球体
   }
-  
+
   // 边样式
   graphInstance
     .linkWidth(1)
@@ -270,15 +266,15 @@ function initGraph() {
     .linkDirectionalArrowLength(3)
     .linkDirectionalArrowRelPos(1)
     // 边 tooltip（始终启用）
-    .linkLabel(link => link.label || '')
-  
+    .linkLabel((link) => link.label || '')
+
   // 3. text-links 示例：使用 SpriteText 显示边文本（仅小数据集 ≤ 2000）
   if (showLinkLabels) {
     graphInstance
       .linkThreeObjectExtend(true)
-      .linkThreeObject(link => {
+      .linkThreeObject((link) => {
         if (!link.label) return null
-        
+
         const sprite = new SpriteText(link.label)
         sprite.color = isDark ? '#888888' : 'lightgrey'
         sprite.textHeight = 3
@@ -295,10 +291,10 @@ function initGraph() {
         Object.assign(sprite.position, middlePos)
       })
   }
-  
+
   graphInstance
     // 4. 悬停事件 - 用于自定义 tooltip（大数据集时）
-    .onNodeHover(node => {
+    .onNodeHover((node) => {
       if (node) {
         tooltipContent.value = node.name
         tooltipVisible.value = true
@@ -306,7 +302,7 @@ function initGraph() {
         tooltipVisible.value = false
       }
     })
-    .onLinkHover(link => {
+    .onLinkHover((link) => {
       if (link && link.label) {
         tooltipContent.value = link.label
         tooltipVisible.value = true
@@ -314,11 +310,11 @@ function initGraph() {
         tooltipVisible.value = false
       }
     })
-    
+
     // 5. click-to-focus 示例：点击节点相机聚焦
-    .onNodeClick(node => {
+    .onNodeClick((node) => {
       if (!node) return
-      
+
       // 发送点击事件
       emit('node-click', {
         id: node.id,
@@ -333,17 +329,18 @@ function initGraph() {
       const distance = 100
       const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z)
 
-      const newPos = node.x || node.y || node.z
-        ? { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }
-        : { x: 0, y: 0, z: distance }
+      const newPos =
+        node.x || node.y || node.z
+          ? { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }
+          : { x: 0, y: 0, z: distance }
 
       graphInstance.cameraPosition(
         newPos, // new position
         node, // lookAt ({ x, y, z })
-        1000  // ms transition duration
+        1000 // ms transition duration
       )
     })
-    .onLinkClick(link => {
+    .onLinkClick((link) => {
       if (!link) return
       emit('edge-click', {
         id: link.original?.id,
@@ -407,7 +404,7 @@ function setGraphData() {
   setTimeout(() => {
     clearInterval(progressInterval)
     loadingProgress.value = 100
-    
+
     setTimeout(() => {
       loading.value = false
       loadingProgress.value = 0
@@ -424,16 +421,16 @@ function setGraphData() {
 function applyHighlightKeywords() {
   if (!graphInstance) return
 
-  const hasHighlightKeywords = props.highlightKeywords?.some(kw => kw.trim() !== '')
+  const hasHighlightKeywords = props.highlightKeywords?.some((kw) => kw.trim() !== '')
 
   if (!hasHighlightKeywords) {
     // 恢复自动着色 - 直接使用 node.color（由 nodeAutoColorBy 自动设置）
-    graphInstance.nodeColor(node => node.color)
+    graphInstance.nodeColor((node) => node.color)
     return
   }
-  
+
   // 搜索高亮 - 覆盖部分节点颜色
-  graphInstance.nodeColor(node => {
+  graphInstance.nodeColor((node) => {
     if (shouldHighlightNode(node)) {
       return '#faad14' // 金黄色高亮
     }
@@ -448,7 +445,7 @@ function applyHighlightKeywords() {
 function clearHighlights() {
   if (!graphInstance) return
   // 恢复使用 nodeAutoColorBy 自动生成的颜色
-  graphInstance.nodeColor(node => node.color)
+  graphInstance.nodeColor((node) => node.color)
 }
 
 /**
@@ -458,20 +455,20 @@ async function focusNode(id) {
   if (!graphInstance || !props.enableFocusNeighbor) return
 
   const data = graphInstance.graphData()
-  const targetNode = data.nodes.find(n => n.id === id)
+  const targetNode = data.nodes.find((n) => n.id === id)
   if (!targetNode) return
 
   const connectedNodeIds = new Set([id])
-  
+
   // 使用节点的 neighbors 属性
   if (targetNode.neighbors) {
-    targetNode.neighbors.forEach(neighbor => connectedNodeIds.add(neighbor.id))
+    targetNode.neighbors.forEach((neighbor) => connectedNodeIds.add(neighbor.id))
   }
 
   // 更新可见性
   graphInstance
-    .nodeVisibility(node => connectedNodeIds.has(node.id))
-    .linkVisibility(link => {
+    .nodeVisibility((node) => connectedNodeIds.has(node.id))
+    .linkVisibility((link) => {
       const sourceId = link.source.id || link.source
       const targetId = link.target.id || link.target
       return connectedNodeIds.has(sourceId) && connectedNodeIds.has(targetId)
@@ -483,9 +480,7 @@ async function focusNode(id) {
  */
 async function clearFocus() {
   if (!graphInstance) return
-  graphInstance
-    .nodeVisibility(true)
-    .linkVisibility(true)
+  graphInstance.nodeVisibility(true).linkVisibility(true)
 }
 
 /**
@@ -493,16 +488,18 @@ async function clearFocus() {
  */
 function refreshGraph() {
   if (graphInstance) {
-    try { graphInstance._destructor() } catch (e) {}
+    try {
+      graphInstance._destructor()
+    } catch (e) {}
     graphInstance = null
   }
   if (container.value) container.value.innerHTML = ''
-  
+
   // 清除高亮状态（已禁用）
   // highlightNodes.clear()
   // highlightLinks.clear()
   // hoverNode = null
-  
+
   clearTimeout(renderTimeout)
   renderTimeout = setTimeout(() => {
     initGraph()
@@ -536,10 +533,14 @@ function getInstance() {
 }
 
 // 监听数据变化
-watch(() => props.graphData, () => {
-  clearTimeout(renderTimeout)
-  renderTimeout = setTimeout(() => setGraphData(), 50)
-}, { deep: true })
+watch(
+  () => props.graphData,
+  () => {
+    clearTimeout(renderTimeout)
+    renderTimeout = setTimeout(() => setGraphData(), 50)
+  },
+  { deep: true }
+)
 
 // 监听关键词变化
 watch(
@@ -554,43 +555,44 @@ watch(
 )
 
 // 监听主题切换
-watch(() => themeStore.isDark, (isDark) => {
-  if (graphInstance) {
-    const nodeCount = graphInstance.graphData().nodes.length
-    const showNodeLabels = nodeCount <= 2000
-    const showLinkLabels = nodeCount <= 2000
-    
-    // 更新背景色
-    graphInstance.backgroundColor(getCSSVariable('--gray-0'))
-    
-    // 更新边样式
-    graphInstance
-      .linkColor(() => getCSSVariable('--gray-400'))
-      .linkOpacity(isDark ? 0.5 : 0.3)
-    
-    // 仅在小数据集时更新 3D 文本标签颜色
-    if (showNodeLabels) {
-      graphInstance.nodeThreeObject(node => {
-        const sprite = new SpriteText(node.name)
-        sprite.material.depthWrite = false
-        sprite.color = node.color || (isDark ? '#e0e0e0' : '#333333')
-        sprite.textHeight = 8
-        sprite.center.y = -0.6
-        return sprite
-      })
-    }
-    
-    if (showLinkLabels) {
-      graphInstance.linkThreeObject(link => {
-        if (!link.label) return null
-        const sprite = new SpriteText(link.label)
-        sprite.color = isDark ? '#888888' : 'lightgrey'
-        sprite.textHeight = 3
-        return sprite
-      })
+watch(
+  () => themeStore.isDark,
+  (isDark) => {
+    if (graphInstance) {
+      const nodeCount = graphInstance.graphData().nodes.length
+      const showNodeLabels = nodeCount <= 2000
+      const showLinkLabels = nodeCount <= 2000
+
+      // 更新背景色
+      graphInstance.backgroundColor(getCSSVariable('--gray-0'))
+
+      // 更新边样式
+      graphInstance.linkColor(() => getCSSVariable('--gray-400')).linkOpacity(isDark ? 0.5 : 0.3)
+
+      // 仅在小数据集时更新 3D 文本标签颜色
+      if (showNodeLabels) {
+        graphInstance.nodeThreeObject((node) => {
+          const sprite = new SpriteText(node.name)
+          sprite.material.depthWrite = false
+          sprite.color = node.color || (isDark ? '#e0e0e0' : '#333333')
+          sprite.textHeight = 8
+          sprite.center.y = -0.6
+          return sprite
+        })
+      }
+
+      if (showLinkLabels) {
+        graphInstance.linkThreeObject((link) => {
+          if (!link.label) return null
+          const sprite = new SpriteText(link.label)
+          sprite.color = isDark ? '#888888' : 'lightgrey'
+          sprite.textHeight = 3
+          return sprite
+        })
+      }
     }
   }
-})
+)
 
 onMounted(() => {
   // 检查 WebGL 支持
@@ -634,9 +636,11 @@ onUnmounted(() => {
   }
   clearTimeout(renderTimeout)
   clearInterval(progressInterval)
-  try { graphInstance?._destructor() } catch (e) {}
+  try {
+    graphInstance?._destructor()
+  } catch (e) {}
   graphInstance = null
-  
+
   // 清理状态（已禁用）
   // highlightNodes.clear()
   // highlightLinks.clear()
@@ -749,7 +753,7 @@ defineExpose({
   font-size: 14px;
   font-weight: 500;
   color: var(--gray-900);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   pointer-events: none;
   z-index: 99999;
   white-space: nowrap;
@@ -851,4 +855,3 @@ defineExpose({
   }
 }
 </style>
-

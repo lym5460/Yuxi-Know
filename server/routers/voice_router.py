@@ -2,6 +2,7 @@
 语音交互 WebSocket 路由器 - 豆包端到端模式
 
 使用豆包 Realtime API 实现语音到语音的实时对话。
+支持知识库 RAG 检索增强。
 """
 
 import asyncio
@@ -213,6 +214,7 @@ async def voice_websocket(
     receive_task: asyncio.Task | None = None
     timeout_task: asyncio.Task | None = None
     current_question_id: str | None = None
+    current_asr_text: str = ""  # 累积 ASR 识别文本用于 RAG 检索
 
     await send_status(websocket, VoiceStatus.IDLE)
 
@@ -229,7 +231,7 @@ async def voice_websocket(
 
     async def handle_doubao_events():
         """处理豆包服务端事件"""
-        nonlocal current_question_id, is_listening
+        nonlocal current_question_id, is_listening, current_asr_text
 
         while doubao_client.is_connected:
             result = await doubao_client.receive()
@@ -243,6 +245,7 @@ async def voice_websocket(
                 case EventID.ASR_INFO:
                     # 检测到用户开始说话，可用于打断
                     current_question_id = payload.get("question_id")
+                    current_asr_text = ""  # 重置 ASR 文本
                     if interrupt_enabled:
                         await send_status(websocket, VoiceStatus.LISTENING)
 
@@ -254,15 +257,18 @@ async def voice_websocket(
                         is_interim = r.get("is_interim", True)
                         if text:
                             await send_transcription(websocket, text, is_final=not is_interim)
+                            # 累积最终的 ASR 文本用于 RAG 检索
+                            if not is_interim:
+                                current_asr_text = text
 
                 case EventID.ASR_ENDED:
                     # 用户说话结束
-                    logger.info("用户说话结束")
+                    logger.info(f"用户说话结束，ASR 文本: {current_asr_text}")
                     await send_status(websocket, VoiceStatus.PROCESSING)
 
-                    # 如果配置了知识库，执行检索并发送 RAG 结果
-                    if knowledges and current_question_id:
-                        await do_rag_retrieval(doubao_client, knowledges)
+                    # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
+                    if knowledges and current_asr_text:
+                        await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
 
                 case EventID.TTS_SENTENCE_START:
                     # TTS 开始合成
@@ -296,24 +302,50 @@ async def voice_websocket(
                     logger.error(f"豆包会话错误: {error_msg}")
                     await send_error(websocket, f"语音服务错误: {error_msg}")
 
-    async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_names: list[str]):
-        """执行知识库检索并发送结果"""
-        # 获取最后的 ASR 文本作为查询
-        # 注意：这里简化处理，实际应该从 ASR_RESPONSE 中累积完整文本
+    async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_ids: list[str], query: str):
+        """执行知识库检索并发送结果给豆包
+
+        Args:
+            client: 豆包客户端
+            kb_ids: 知识库 ID 列表
+            query: 用户查询文本
+        """
+        if not query or not kb_ids:
+            return
+
         try:
             from src.knowledge import knowledge_base
 
-            retrievers = knowledge_base.get_retrievers()
             rag_results = []
 
-            for kb_id, kb_info in retrievers.items():
-                if kb_info["name"] in kb_names:
-                    # 使用最近的 query（这里需要从 ASR 结果中获取）
-                    # 暂时跳过，因为需要在 ASR_RESPONSE 中累积文本
-                    pass
+            for kb_id in kb_ids:
+                try:
+                    # 执行知识库检索
+                    results = await knowledge_base.aquery(query, kb_id, top_k=3)
 
+                    # 转换为豆包 RAG 格式
+                    for i, result in enumerate(results):
+                        if isinstance(result, dict):
+                            content = result.get("content") or result.get("text", "")
+                            title = result.get("title") or result.get("filename") or f"文档片段 {i + 1}"
+                        else:
+                            content = str(result)
+                            title = f"文档片段 {i + 1}"
+
+                        if content:
+                            rag_results.append({"title": title, "content": content})
+
+                except Exception as e:
+                    logger.warning(f"知识库 {kb_id} 检索失败: {e}")
+                    continue
+
+            # 发送 RAG 结果给豆包
             if rag_results:
+                logger.info(f"发送 RAG 结果: {len(rag_results)} 条")
                 await client.send_rag_text(rag_results)
+            else:
+                logger.debug("RAG 检索无结果")
+
         except Exception as e:
             logger.warning(f"RAG 检索失败: {e}")
 

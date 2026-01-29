@@ -1,6 +1,6 @@
 /**
  * 浏览器语音识别 Composable
- * 
+ *
  * 使用 Web Speech API 实现实时语音转文字预览
  * 用于在后端 Whisper 返回最终结果前，给用户即时反馈
  */
@@ -83,7 +83,7 @@ export function useSpeechRecognition(options = {}) {
       recognition.onend = () => {
         isListening.value = false
         onEnd?.()
-        
+
         // 如果还需要继续监听，自动重启
         if (continuous && isListening.value) {
           recognition.start()

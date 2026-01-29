@@ -76,12 +76,12 @@
                   <h2>{{ currentAgentName }}</h2>
                   <p>点击下方麦克风开始语音对话</p>
                 </div>
-                
+
                 <!-- 消息列表 -->
                 <div v-else class="voice-messages-list">
-                  <div 
-                    v-for="(msg, index) in voiceMessages" 
-                    :key="index" 
+                  <div
+                    v-for="(msg, index) in voiceMessages"
+                    :key="index"
                     class="voice-message"
                     :class="msg.role"
                   >
@@ -96,11 +96,10 @@
 
               <!-- 底部控制区域 -->
               <div class="voice-controls">
-
                 <!-- 音频可视化 -->
-                <AudioVisualizer 
-                  v-if="voiceRecording" 
-                  :audio-level="voiceAudioLevel" 
+                <AudioVisualizer
+                  v-if="voiceRecording"
+                  :audio-level="voiceAudioLevel"
                   class="voice-visualizer"
                 />
 
@@ -111,7 +110,7 @@
                 </div>
 
                 <!-- 麦克风按钮 -->
-                <div 
+                <div
                   class="voice-mic-button"
                   :class="{ recording: voiceRecording, speaking: voiceStatus === 'speaking' }"
                   @click="toggleVoiceRecording"
@@ -196,45 +195,45 @@
 
               <!-- 文本模式 UI -->
               <div class="message-input-wrapper">
-              <AgentInputArea
-                ref="messageInputRef"
-                v-model="userInput"
-                :is-loading="isProcessing"
-                :disabled="!currentAgent"
-                :send-button-disabled="(!userInput || !currentAgent) && !isProcessing"
-                placeholder="输入问题..."
-                :supports-file-upload="supportsFileUpload"
-                :supports-voice="false"
-                :agent-id="currentAgentId"
-                :thread-id="currentChatId"
-                :ensure-thread="ensureActiveThread"
-                :has-state-content="hasAgentStateContent"
-                :is-panel-open="isAgentPanelOpen"
-                @send="handleSendOrStop"
-                @attachment-changed="handleAgentStateRefresh"
-                @toggle-panel="toggleAgentPanel"
-              />
+                <AgentInputArea
+                  ref="messageInputRef"
+                  v-model="userInput"
+                  :is-loading="isProcessing"
+                  :disabled="!currentAgent"
+                  :send-button-disabled="(!userInput || !currentAgent) && !isProcessing"
+                  placeholder="输入问题..."
+                  :supports-file-upload="supportsFileUpload"
+                  :supports-voice="false"
+                  :agent-id="currentAgentId"
+                  :thread-id="currentChatId"
+                  :ensure-thread="ensureActiveThread"
+                  :has-state-content="hasAgentStateContent"
+                  :is-panel-open="isAgentPanelOpen"
+                  @send="handleSendOrStop"
+                  @attachment-changed="handleAgentStateRefresh"
+                  @toggle-panel="toggleAgentPanel"
+                />
 
-              <!-- 示例问题 -->
-              <div
-                class="example-questions"
-                v-if="!conversations.length && exampleQuestions.length > 0"
-              >
-                <div class="example-chips">
-                  <div
-                    v-for="question in exampleQuestions"
-                    :key="question.id"
-                    class="example-chip"
-                    @click="handleExampleClick(question.text)"
-                  >
-                    {{ question.text }}
+                <!-- 示例问题 -->
+                <div
+                  class="example-questions"
+                  v-if="!conversations.length && exampleQuestions.length > 0"
+                >
+                  <div class="example-chips">
+                    <div
+                      v-for="question in exampleQuestions"
+                      :key="question.id"
+                      class="example-chip"
+                      @click="handleExampleClick(question.text)"
+                    >
+                      {{ question.text }}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div class="bottom-actions" v-else>
-                <p class="note">请注意辨别内容的可靠性</p>
-              </div>
+                <div class="bottom-actions" v-else>
+                  <p class="note">请注意辨别内容的可靠性</p>
+                </div>
               </div>
             </div>
           </template>
@@ -264,7 +263,16 @@ import AgentInputArea from '@/components/AgentInputArea.vue'
 import AgentMessageComponent from '@/components/AgentMessageComponent.vue'
 import ChatSidebarComponent from '@/components/ChatSidebarComponent.vue'
 import RefsComponent from '@/components/RefsComponent.vue'
-import { PanelLeftOpen, MessageCirclePlus, LoaderCircle, ChevronDown, Bot, Mic, MicOff, StopCircle } from 'lucide-vue-next'
+import {
+  PanelLeftOpen,
+  MessageCirclePlus,
+  LoaderCircle,
+  ChevronDown,
+  Bot,
+  Mic,
+  MicOff,
+  StopCircle
+} from 'lucide-vue-next'
 import { handleChatError, handleValidationError } from '@/utils/errorHandler'
 import { ScrollController } from '@/utils/scrollController'
 import { AgentValidator } from '@/utils/agentValidator'
@@ -1065,7 +1073,7 @@ const toggleAgentPanel = () => {
 // 语音模式状态
 const voiceStatus = ref('idle')
 const voiceTranscription = ref('')
-const voiceInterimTranscript = ref('')  // 实时预览文字（来自后端流式ASR）
+const voiceInterimTranscript = ref('') // 实时预览文字（来自后端流式ASR）
 const voiceRecording = ref(false)
 const voiceAudioLevel = ref(0)
 const voiceMessages = ref([])
@@ -1073,32 +1081,41 @@ const voiceMessagesContainer = ref(null)
 let voiceWs = null
 
 // 先初始化音频播放器
-const { playAudioChunk, flush: flushVoiceAudio, stop: stopVoiceAudio, reset: resetVoiceAudio } = useAudioPlayer()
+const {
+  playAudioChunk,
+  flush: flushVoiceAudio,
+  stop: stopVoiceAudio,
+  reset: resetVoiceAudio
+} = useAudioPlayer()
 
 // 智能打断：当用户开始说话时立即停止 AI
 const handleSmartInterrupt = () => {
   console.log('🎤 智能打断触发，当前状态:', voiceStatus.value, '录音状态:', voiceRecording.value)
-  
+
   // 立即停止音频播放
   stopVoiceAudio()
-  
+
   // 设置打断状态，忽略后续的文字和音频
   currentStreamingMsgIndex.value = -2
-  
+
   // 如果 WebSocket 连接存在，发送打断命令
   if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
     sendControl(voiceWs, 'interrupt')
     console.log('📤 已发送打断命令到后端')
   }
-  
+
   // 重置实时预览
   voiceInterimTranscript.value = ''
-  
+
   // 状态切换到监听
   voiceStatus.value = 'listening'
 }
 
-const { startCapture, stopCapture, isSpeaking: voiceIsSpeaking } = useAudioCapture({
+const {
+  startCapture,
+  stopCapture,
+  isSpeaking: voiceIsSpeaking
+} = useAudioCapture({
   onAudioChunk: (chunk) => {
     if (voiceWs) sendAudio(voiceWs, chunk)
   },
@@ -1250,9 +1267,9 @@ function startVoiceRecording() {
   resetVoiceAudio()
   // 重置流式消息索引
   currentStreamingMsgIndex.value = -1
-  
+
   connectVoiceWebSocket()
-  
+
   const checkAndStart = () => {
     if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
       // 如果当前正在处理或说话，先发送打断命令
@@ -1280,17 +1297,17 @@ function stopVoiceRecording() {
   resetVoiceAudio()
   // 设置打断状态，忽略后续的文字和音频
   currentStreamingMsgIndex.value = -2
-  
+
   voiceRecording.value = false
   voiceTranscription.value = ''
   voiceInterimTranscript.value = ''
-  
+
   // 关闭 WebSocket 连接
   if (voiceWs) {
     voiceWs.close()
     voiceWs = null
   }
-  
+
   voiceStatus.value = 'idle'
 }
 
@@ -1629,12 +1646,28 @@ watch(
   background: var(--gray-300);
   transition: all 0.3s;
 
-  &.idle { background: var(--gray-400); }
-  &.connecting { background: var(--color-warning); animation: pulse 1s infinite; }
-  &.listening { background: var(--color-success); animation: pulse 1s infinite; }
-  &.processing { background: var(--color-warning); animation: pulse 0.5s infinite; }
-  &.speaking { background: var(--main-color); animation: pulse 1s infinite; }
-  &.error { background: var(--color-error); }
+  &.idle {
+    background: var(--gray-400);
+  }
+  &.connecting {
+    background: var(--color-warning);
+    animation: pulse 1s infinite;
+  }
+  &.listening {
+    background: var(--color-success);
+    animation: pulse 1s infinite;
+  }
+  &.processing {
+    background: var(--color-warning);
+    animation: pulse 0.5s infinite;
+  }
+  &.speaking {
+    background: var(--main-color);
+    animation: pulse 1s infinite;
+  }
+  &.error {
+    background: var(--color-error);
+  }
 }
 
 .status-text {
@@ -1681,7 +1714,7 @@ watch(
   align-items: center;
   gap: 6px;
   color: var(--color-error);
-  
+
   &:hover {
     color: var(--color-error);
     background: var(--color-error-bg);
@@ -1876,20 +1909,32 @@ watch(
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes recording-pulse {
-  0%, 100% { 
+  0%,
+  100% {
     box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4);
   }
-  50% { 
+  50% {
     box-shadow: 0 0 0 20px rgba(255, 77, 79, 0);
   }
 }

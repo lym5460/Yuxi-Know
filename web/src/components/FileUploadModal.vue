@@ -778,8 +778,8 @@ const getAuthHeaders = () => {
 
 const openDocLink = () => {
   // 移除外部文档链接
-  message.info('请联系管理员获取文档处理帮助');
-};
+  message.info('请联系管理员获取文档处理帮助')
+}
 
 const chunkData = async () => {
   if (!databaseId.value) {

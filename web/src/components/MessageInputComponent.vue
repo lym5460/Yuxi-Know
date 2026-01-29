@@ -133,7 +133,7 @@ const hasOptionsLeft = computed(() => {
   }
   const renderedNodes = slot()
   // Filter out comment nodes (created by v-if when condition is false)
-  const validNodes = renderedNodes.filter(node => node.type !== Comment)
+  const validNodes = renderedNodes.filter((node) => node.type !== Comment)
   return validNodes.length > 0
 })
 
@@ -144,7 +144,7 @@ const hasActionsLeft = computed(() => {
   }
   const renderedNodes = slot()
   // Filter out comment nodes (created by v-if when condition is false)
-  const validNodes = renderedNodes.filter(node => node.type !== Comment)
+  const validNodes = renderedNodes.filter((node) => node.type !== Comment)
   return validNodes.length > 0
 })
 

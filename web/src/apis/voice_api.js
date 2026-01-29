@@ -1,6 +1,6 @@
 /**
  * 语音 API
- * 
+ *
  * 实现 WebSocket 连接管理和语音配置 API 调用
  * Validates: Requirements 12.1, 12.3
  */
@@ -28,13 +28,13 @@ export function createVoiceWebSocket(agentId, handlers = {}) {
   const host = window.location.host
   // 使用 /api/voice 路径，与后端路由结构一致
   const url = `${protocol}//${host}/api/voice/ws/voice/${agentId}?token=${token}`
-  
+
   const ws = new WebSocket(url)
-  
+
   ws.onopen = () => {
     handlers.onOpen?.()
   }
-  
+
   ws.onmessage = (event) => {
     try {
       const message = JSON.parse(event.data)
@@ -43,15 +43,15 @@ export function createVoiceWebSocket(agentId, handlers = {}) {
       console.error('Failed to parse message:', e)
     }
   }
-  
+
   ws.onerror = (error) => {
     handlers.onError?.(error)
   }
-  
+
   ws.onclose = (event) => {
     handlers.onClose?.(event)
   }
-  
+
   return ws
 }
 
@@ -62,10 +62,12 @@ export function createVoiceWebSocket(agentId, handlers = {}) {
  */
 export function sendAudio(ws, audioDataB64) {
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'audio',
-      audio_data: audioDataB64
-    }))
+    ws.send(
+      JSON.stringify({
+        type: 'audio',
+        audio_data: audioDataB64
+      })
+    )
   }
 }
 
@@ -76,10 +78,12 @@ export function sendAudio(ws, audioDataB64) {
  */
 export function sendControl(ws, action) {
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'control',
-      action
-    }))
+    ws.send(
+      JSON.stringify({
+        type: 'control',
+        action
+      })
+    )
   }
 }
 
@@ -90,9 +94,11 @@ export function sendControl(ws, action) {
  */
 export function sendConfig(ws, config) {
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'config',
-      config
-    }))
+    ws.send(
+      JSON.stringify({
+        type: 'config',
+        config
+      })
+    )
   }
 }
