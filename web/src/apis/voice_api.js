@@ -6,6 +6,7 @@
  */
 
 import { useUserStore } from '@/stores/user'
+import { apiGet, apiPost } from './base'
 
 /**
  * 获取认证 token
@@ -14,6 +15,25 @@ import { useUserStore } from '@/stores/user'
 function getToken() {
   const userStore = useUserStore()
   return userStore.token || null
+}
+
+/**
+ * 获取语音消息历史
+ * @param {string} threadId - 会话 ID
+ * @returns {Promise<Array>} - 语音消息列表
+ */
+export function getVoiceMessages(threadId) {
+  return apiGet(`/api/voice/messages/${threadId}`)
+}
+
+/**
+ * 保存语音消息
+ * @param {string} threadId - 会话 ID
+ * @param {Object} message - 消息对象 { role: 'user'|'assistant', content: string }
+ * @returns {Promise}
+ */
+export function saveVoiceMessage(threadId, message) {
+  return apiPost(`/api/voice/messages/${threadId}`, message)
 }
 
 /**

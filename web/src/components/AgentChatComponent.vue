@@ -286,7 +286,7 @@ import { useApproval } from '@/composables/useApproval'
 import { useAgentStreamHandler } from '@/composables/useAgentStreamHandler'
 import AgentPanel from '@/components/AgentPanel.vue'
 import AudioVisualizer from '@/components/voice/AudioVisualizer.vue'
-import { createVoiceWebSocket, sendAudio, sendControl } from '@/apis/voice_api'
+import { createVoiceWebSocket, sendAudio, sendControl, getVoiceMessages, saveVoiceMessage } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 
@@ -513,7 +513,8 @@ const getThreadState = (threadId) => {
       isStreaming: false,
       streamAbortController: null,
       onGoingConv: createOnGoingConvState(),
-      agentState: null // 添加 agentState 字段
+      agentState: null,
+      voiceMessages: [] // 语音消息存储
     }
   }
   return chatState.threadStates[threadId]
@@ -748,6 +749,8 @@ const isFirstChatEmpty = () => {
   if (threads.value.length === 0) return false
   const firstThread = threads.value[0]
   const firstThreadMessages = threadMessages.value[firstThread.id] || []
+  // 语音模式下也检查 voiceMessages
+  if (supportsVoice.value && voiceMessages.value.length > 0) return false
   return firstThreadMessages.length === 0
 }
 
@@ -772,7 +775,24 @@ const createNewChat = async () => {
 
   // 只有当当前对话是第一个对话且为空时，才阻止创建新对话
   const currentThreadIndex = threads.value.findIndex((thread) => thread.id === currentChatId.value)
-  if (currentChatId.value && conversations.value.length === 0 && currentThreadIndex === 0) return
+  // 语音模式下检查 voiceMessages，文本模式下检查 conversations
+  const isCurrentChatEmpty = supportsVoice.value
+    ? voiceMessages.value.length === 0
+    : conversations.value.length === 0
+  if (currentChatId.value && isCurrentChatEmpty && currentThreadIndex === 0) return
+
+  // 语音模式下创建新对话时，先停止当前录音
+  if (supportsVoice.value && voiceRecording.value) {
+    stopVoiceRecording()
+  }
+
+  // 语音模式下创建新对话时，清空当前语音消息
+  if (supportsVoice.value) {
+    clearVoiceMessages()
+    voiceTranscription.value = ''
+    voiceInterimTranscript.value = ''
+    currentStreamingMsgIndex.value = -1
+  }
 
   chatUIStore.creatingNewChat = true
   try {
@@ -808,6 +828,11 @@ const selectChat = async (chatId) => {
   )
     return
 
+  // 语音模式下，切换对话前先关闭当前录音
+  if (supportsVoice.value && voiceRecording.value) {
+    stopVoiceRecording()
+  }
+
   // 中断之前线程的流式输出（如果存在）
   const previousThreadId = chatState.currentThreadId
   if (previousThreadId && previousThreadId !== chatId) {
@@ -823,6 +848,10 @@ const selectChat = async (chatId) => {
   chatUIStore.isLoadingMessages = true
   try {
     await fetchThreadMessages({ agentId: currentAgentId.value, threadId: chatId })
+    // 语音模式下，加载语音消息历史
+    if (supportsVoice.value) {
+      await loadVoiceMessages(chatId)
+    }
   } catch (error) {
     handleChatError(error, 'load')
   } finally {
@@ -1076,9 +1105,66 @@ const voiceTranscription = ref('')
 const voiceInterimTranscript = ref('') // 实时预览文字（来自后端流式ASR）
 const voiceRecording = ref(false)
 const voiceAudioLevel = ref(0)
-const voiceMessages = ref([])
 const voiceMessagesContainer = ref(null)
 let voiceWs = null
+
+// 语音消息存储在 threadState 中，这里用计算属性访问
+const voiceMessages = computed(() => {
+  const threadState = getThreadState(currentChatId.value)
+  return threadState?.voiceMessages || []
+})
+
+// 添加语音消息（不保存到后端，用于流式显示）
+const addVoiceMessageLocal = (msg) => {
+  const threadState = getThreadState(currentChatId.value)
+  if (threadState) {
+    threadState.voiceMessages.push(msg)
+  }
+}
+
+// 添加语音消息并保存到后端
+const addVoiceMessage = async (msg) => {
+  const threadState = getThreadState(currentChatId.value)
+  if (threadState) {
+    threadState.voiceMessages.push(msg)
+    // 异步保存到后端
+    try {
+      await saveVoiceMessage(currentChatId.value, msg)
+    } catch (e) {
+      console.warn('保存语音消息失败:', e)
+    }
+  }
+}
+
+// 更新语音消息内容
+const updateVoiceMessage = (index, content) => {
+  const threadState = getThreadState(currentChatId.value)
+  if (threadState && threadState.voiceMessages[index]) {
+    threadState.voiceMessages[index].content += content
+  }
+}
+
+// 清空语音消息
+const clearVoiceMessages = () => {
+  const threadState = getThreadState(currentChatId.value)
+  if (threadState) {
+    threadState.voiceMessages = []
+  }
+}
+
+// 加载语音消息历史
+const loadVoiceMessages = async (threadId) => {
+  if (!threadId) return
+  try {
+    const messages = await getVoiceMessages(threadId)
+    const threadState = getThreadState(threadId)
+    if (threadState) {
+      threadState.voiceMessages = messages || []
+    }
+  } catch (e) {
+    console.warn('加载语音消息失败:', e)
+  }
+}
 
 // 先初始化音频播放器
 const {
@@ -1186,7 +1272,12 @@ function handleVoiceMessage(msg) {
       if (msg.is_final) {
         // 最终结果
         if (msg.text) {
-          voiceMessages.value.push({ role: 'user', content: msg.text })
+          addVoiceMessage({ role: 'user', content: msg.text })
+          // 如果是第一条消息，用它更新对话标题
+          if (voiceMessages.value.length === 1) {
+            const title = msg.text.length > 30 ? msg.text.slice(0, 30) : msg.text
+            updateThread(currentChatId.value, title)
+          }
         }
         voiceTranscription.value = ''
         voiceInterimTranscript.value = ''
@@ -1204,18 +1295,26 @@ function handleVoiceMessage(msg) {
       // 如果已经被打断（currentStreamingMsgIndex === -2），忽略后续文本
       if (msg.text && currentStreamingMsgIndex.value !== -2) {
         if (currentStreamingMsgIndex.value === -1) {
-          // 创建新的 AI 消息
-          voiceMessages.value.push({ role: 'assistant', content: msg.text })
+          // 创建新的 AI 消息（不保存，等完成后再保存）
+          addVoiceMessageLocal({ role: 'assistant', content: msg.text })
           currentStreamingMsgIndex.value = voiceMessages.value.length - 1
         } else {
           // 追加到现有消息
-          voiceMessages.value[currentStreamingMsgIndex.value].content += msg.text
+          updateVoiceMessage(currentStreamingMsgIndex.value, msg.text)
         }
         scrollVoiceMessages()
       }
       break
     case 'response_end':
-      // 响应结束，重置流式消息索引
+      // 响应结束，保存完整的 AI 消息到后端
+      if (currentStreamingMsgIndex.value >= 0) {
+        const completeMsg = voiceMessages.value[currentStreamingMsgIndex.value]
+        if (completeMsg) {
+          saveVoiceMessage(currentChatId.value, completeMsg).catch((e) => {
+            console.warn('保存 AI 消息失败:', e)
+          })
+        }
+      }
       currentStreamingMsgIndex.value = -1
       break
     case 'audio':
@@ -1245,7 +1344,8 @@ function connectVoiceWebSocket() {
   voiceWs = createVoiceWebSocket(currentAgentId.value, {
     onMessage: handleVoiceMessage,
     onOpen: () => {
-      voiceStatus.value = 'idle'
+      // WebSocket 连接成功，但还需要等待豆包会话启动
+      // 状态由后端 status 消息控制
     },
     onClose: () => {
       voiceWs = null
@@ -1268,24 +1368,39 @@ function startVoiceRecording() {
   // 重置流式消息索引
   currentStreamingMsgIndex.value = -1
 
-  connectVoiceWebSocket()
-
-  const checkAndStart = () => {
-    if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
-      // 如果当前正在处理或说话，先发送打断命令
-      if (voiceStatus.value === 'processing' || voiceStatus.value === 'speaking') {
-        sendControl(voiceWs, 'interrupt')
-      } else {
-        sendControl(voiceWs, 'start')
+  // 如果没有当前对话，先创建一个
+  const doStart = async () => {
+    if (!currentChatId.value) {
+      voiceStatus.value = 'connecting'
+      const threadId = await ensureActiveThread('语音对话')
+      if (!threadId) {
+        message.error('创建对话失败')
+        voiceStatus.value = 'idle'
+        return
       }
-      startCapture()
-      voiceRecording.value = true
-      voiceStatus.value = 'listening'
-    } else if (voiceWs) {
-      setTimeout(checkAndStart, 100)
     }
+
+    connectVoiceWebSocket()
+
+    const checkAndStart = () => {
+      if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+        // 如果当前正在处理或说话，先发送打断命令
+        if (voiceStatus.value === 'processing' || voiceStatus.value === 'speaking') {
+          sendControl(voiceWs, 'interrupt')
+        } else {
+          sendControl(voiceWs, 'start')
+        }
+        startCapture()
+        voiceRecording.value = true
+        // 不在这里设置 listening，等后端返回 status: listening 再设置
+      } else if (voiceWs) {
+        setTimeout(checkAndStart, 100)
+      }
+    }
+    checkAndStart()
   }
-  checkAndStart()
+
+  doStart()
 }
 
 function stopVoiceRecording() {

@@ -10,14 +10,18 @@ import base64
 import os
 import uuid
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.utils.auth_middleware import get_required_user
 from server.utils.auth_utils import AuthUtils
 from src.agents import agent_manager
 from src.repositories.agent_config_repository import AgentConfigRepository
+from src.repositories.conversation_repository import ConversationRepository
 from src.services.voice.doubao_realtime import DoubaoConfig, DoubaoRealtimeClient, EventID
 from src.storage.postgres.manager import pg_manager
+from src.storage.postgres.models_business import User
 from src.utils.logging_config import logger
 
 
@@ -69,6 +73,13 @@ class ServerMessage(BaseModel):
     error: str | None = None
 
 
+class VoiceMessageRequest(BaseModel):
+    """语音消息请求模型"""
+
+    role: str  # 'user' or 'assistant'
+    content: str
+
+
 # =============================================================================
 # 辅助函数
 # =============================================================================
@@ -115,6 +126,56 @@ async def send_audio(websocket: WebSocket, audio_data: bytes) -> None:
 # =============================================================================
 
 voice = APIRouter(prefix="/voice", tags=["voice"])
+
+
+# =============================================================================
+# 语音消息持久化 API
+# =============================================================================
+
+
+@voice.get("/messages/{thread_id}")
+async def get_voice_messages(
+    thread_id: str,
+    current_user: User = Depends(get_required_user),
+):
+    """获取语音消息历史"""
+    async with pg_manager.get_async_session_context() as db:
+        conv_repo = ConversationRepository(db)
+        messages = await conv_repo.get_messages_by_thread_id(thread_id)
+
+        # 过滤出语音消息
+        voice_messages = []
+        for msg in messages:
+            if msg.message_type == "voice":
+                voice_messages.append({"role": msg.role, "content": msg.content})
+
+        return voice_messages
+
+
+@voice.post("/messages/{thread_id}")
+async def save_voice_message(
+    thread_id: str,
+    message: VoiceMessageRequest,
+    current_user: User = Depends(get_required_user),
+):
+    """保存语音消息"""
+    async with pg_manager.get_async_session_context() as db:
+        conv_repo = ConversationRepository(db)
+
+        # 检查会话是否存在
+        conversation = await conv_repo.get_conversation_by_thread_id(thread_id)
+        if not conversation:
+            return {"success": False, "error": "会话不存在"}
+
+        # 保存消息
+        await conv_repo.add_message(
+            conversation_id=conversation.id,
+            role=message.role,
+            content=message.content,
+            message_type="voice",
+        )
+
+        return {"success": True}
 
 
 @voice.websocket("/ws/voice/{agent_id}")
