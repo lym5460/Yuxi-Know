@@ -319,6 +319,22 @@ class DoubaoRealtimeClient:
         await self.ws.send(frame)
         logger.debug(f"发送 RAG 结果: {len(rag_results)} 条")
 
+    async def send_tts_text(self, text: str, is_start: bool = True, is_end: bool = True):
+        """发送文本合成音频 (ChatTTSText)
+
+        Args:
+            text: 要合成的文本
+            is_start: 是否是第一包
+            is_end: 是否是最后一包
+        """
+        if not self.session_id:
+            return
+
+        payload = {"start": is_start, "content": text, "end": is_end}
+        frame = self._build_event_frame(EventID.CHAT_TTS_TEXT, payload, self.session_id)
+        await self.ws.send(frame)
+        logger.debug(f"发送 TTS 文本: {text}")
+
     async def finish_session(self, wait_for_confirmation: bool = True):
         """结束会话
 
