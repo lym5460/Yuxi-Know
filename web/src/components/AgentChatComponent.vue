@@ -320,7 +320,7 @@ const {
   agents,
   selectedAgentId,
   defaultAgentId,
-  selectedAgentConfigId,
+  selectedAgentConfigId, configSaveVersion,
   agentConfig,
   configurableItems,
   availableKnowledgeBases,
@@ -2198,6 +2198,28 @@ watch(
   },
   { deep: true, flush: 'post' }
 )
+
+// 监听配置保存，自动重连语音 WebSocket
+watch(configSaveVersion, () => {
+  if (voiceWs) {
+    // 关闭现有连接，下次开始语音时会使用新配置
+    voiceWs.close()
+    voiceWs = null
+    // 如果正在录音，重新连接
+    if (voiceRecording.value) {
+      connectVoiceWebSocket()
+      const checkAndStart = () => {
+        if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+          sendControl(voiceWs, 'start')
+          startCapture()
+        } else if (voiceWs) {
+          setTimeout(checkAndStart, 100)
+        }
+      }
+      checkAndStart()
+    }
+  }
+})
 </script>
 
 <style lang="less" scoped>

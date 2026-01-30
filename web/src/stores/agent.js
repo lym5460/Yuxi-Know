@@ -40,6 +40,9 @@ export const useAgentStore = defineStore(
     const isInitialized = ref(false)
     const isInitializing = ref(false)
 
+    // 配置保存版本号，用于通知组件配置已更新
+    const configSaveVersion = ref(0)
+
     // ==================== 计算属性 ====================
     const selectedAgent = computed(() =>
       selectedAgentId.value ? agents.value.find((a) => a.id === selectedAgentId.value) : null
@@ -376,6 +379,8 @@ export const useAgentStore = defineStore(
           config_json: { context: agentConfig.value }
         })
         originalAgentConfig.value = { ...agentConfig.value }
+        // 递增版本号，通知组件配置已更新
+        configSaveVersion.value++
       } catch (err) {
         console.error('Failed to save agent config:', err)
         handleChatError(err, 'save')
@@ -514,6 +519,9 @@ export const useAgentStore = defineStore(
       agentConfigs,
       selectedAgentConfigId,
       selectedConfigSummary,
+
+      // 配置保存版本号
+      configSaveVersion,
 
       // 方法
       initialize,
