@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from server.routers.apikey_router import apikey
 from server.routers.auth_router import auth
 from server.routers.chat_router import chat
 from server.routers.dashboard_router import dashboard
@@ -9,6 +10,7 @@ from server.routers.knowledge_router import knowledge
 from server.routers.evaluation_router import evaluation
 from server.routers.mcp_router import mcp
 from server.routers.mindmap_router import mindmap
+from server.routers.open_api_router import open_api
 from server.routers.system_router import system
 from server.routers.task_router import tasks
 from server.routers.voice_router import voice
@@ -28,3 +30,5 @@ router.include_router(graph)  # /api/graph/*
 router.include_router(tasks)  # /api/tasks/*
 router.include_router(mcp)  # /api/system/mcp-servers/*
 router.include_router(voice)  # /api/voice/*
+router.include_router(apikey)  # /api/apikeys/*
+router.include_router(open_api)  # /api/v1/open/*

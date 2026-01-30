@@ -58,6 +58,15 @@
           <ApiOutlined class="icon" />
           <span>MCP 管理</span>
         </div>
+        <div
+          class="sider-item"
+          :class="{ activesec: activeTab === 'apikey' }"
+          @click="activeTab = 'apikey'"
+          v-if="userStore.isSuperAdmin"
+        >
+          <KeyOutlined class="icon" />
+          <span>API Key</span>
+        </div>
       </div>
 
       <!-- 顶部导航 (Mobile) -->
@@ -96,6 +105,14 @@
         </div>
         <div
           class="nav-item"
+          :class="{ active: activeTab === 'apikey' }"
+          @click="activeTab = 'apikey'"
+          v-if="userStore.isSuperAdmin"
+        >
+          API Key
+        </div>
+        <div
+          class="nav-item"
           :class="{ active: activeTab === 'department' }"
           @click="activeTab = 'department'"
           v-if="userStore.isSuperAdmin"
@@ -123,6 +140,10 @@
             <McpServersComponent />
           </div>
 
+          <div v-show="activeTab === 'apikey'" v-if="userStore.isSuperAdmin">
+            <ApiKeyManagementComponent />
+          </div>
+
           <div v-show="activeTab === 'department'" v-if="userStore.isSuperAdmin">
             <DepartmentManagementComponent />
           </div>
@@ -140,13 +161,15 @@ import {
   CodeOutlined,
   UserOutlined,
   ApiOutlined,
-  TeamOutlined
+  TeamOutlined,
+  KeyOutlined
 } from '@ant-design/icons-vue'
 import BasicSettingsSection from '@/components/BasicSettingsSection.vue'
 import ModelProvidersComponent from '@/components/ModelProvidersComponent.vue'
 import UserManagementComponent from '@/components/UserManagementComponent.vue'
 import McpServersComponent from '@/components/McpServersComponent.vue'
 import DepartmentManagementComponent from '@/components/DepartmentManagementComponent.vue'
+import ApiKeyManagementComponent from '@/components/ApiKeyManagementComponent.vue'
 
 const props = defineProps({
   visible: {

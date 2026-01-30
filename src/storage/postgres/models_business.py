@@ -458,6 +458,43 @@ class MCPServer(Base):
         return config
 
 
+class APIKey(Base):
+    """API Key 模型 - 用于第三方认证"""
+
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, comment="API Key 名称")
+    description = Column(String(500), nullable=True, comment="描述")
+    key_prefix = Column(String(10), nullable=False, index=True, comment="密钥前缀，用于识别")
+    key_hash = Column(String(64), nullable=False, unique=True, comment="密钥哈希值")
+    scopes = Column(JSON, nullable=False, default=list, comment="权限范围列表")
+    is_active = Column(Integer, nullable=False, default=1, comment="是否启用：1=是，0=否")
+    expires_at = Column(DateTime, nullable=True, comment="过期时间")
+    last_used_at = Column(DateTime, nullable=True, comment="最后使用时间")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False, comment="创建者ID")
+    created_at = Column(DateTime, default=utc_now_naive, comment="创建时间")
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive, comment="更新时间")
+
+    # 关联创建者
+    creator = relationship("User", foreign_keys=[created_by])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "key_prefix": self.key_prefix,
+            "scopes": self.scopes or [],
+            "is_active": bool(self.is_active),
+            "expires_at": format_utc_datetime(self.expires_at),
+            "last_used_at": format_utc_datetime(self.last_used_at),
+            "created_by": self.created_by,
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }
+
+
 class TaskRecord(Base):
     __tablename__ = "tasks"
 
