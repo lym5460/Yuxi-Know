@@ -101,7 +101,7 @@ class VoiceContext(BaseContext):
 
     # 角色设定
     system_role: Annotated[str, {"__template_metadata__": {"kind": "prompt"}}] = field(
-        default="你是一个友好的智能助手，擅长回答各种问题。回答要简洁明了，适合语音播报。",
+        default="你是一个友好的智能助手，擅长回答各种问题。回答时要详细、有条理，用自然口语化的方式表达。",
         metadata={
             "name": "角色设定",
             "description": "描述角色的背景、设定等",

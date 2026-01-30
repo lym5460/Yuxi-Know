@@ -219,7 +219,7 @@ async def voice_websocket(
     doubao_model = "O"
     doubao_voice = "zh_female_vv_jupiter_bigtts"
     bot_name = "语析助手"
-    system_role = "你是一个友好的智能助手，擅长回答各种问题。回答要简洁明了，适合语音播报。"
+    system_role = "你是一个友好的智能助手，擅长回答各种问题。回答时要详细、有条理，用自然口语化的方式表达。"
     speaking_style = ""
     silence_duration_ms = 1500
     interrupt_enabled = True
