@@ -798,6 +798,10 @@ class KnowledgeBase(ABC):
                 "processing": "failed",  # 兼容旧状态
             }
 
+            # memeries 知识库的 INDEXING 表示远程异步处理中（UNPARSE），跳过检查
+            if self.kb_type == "memeries":
+                intermediate_states.pop(FileStatus.INDEXING, None)
+
             # 检查该数据库下所有中间状态的文件
             for file_id, file_info in self.files_meta.items():
                 if file_info.get("database_id") == db_id:

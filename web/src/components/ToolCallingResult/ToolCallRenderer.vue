@@ -5,6 +5,12 @@
   <!-- 网页搜索 -->
   <WebSearchTool v-else-if="isWebSearchResult" :tool-call="toolCall" />
 
+  <!-- 媒体知识库 -->
+  <MediaKnowledgeBaseTool v-else-if="isMediaKnowledgeBaseResult" :tool-call="toolCall" />
+
+  <!-- 知识库 -->
+  <KnowledgeBaseTool v-else-if="isKnowledgeBaseResult" :tool-call="toolCall" />
+
   <!-- Chart -->
   <ChartTool v-else-if="isChartResult" :tool-call="toolCall" />
 
@@ -74,6 +80,7 @@ import WebSearchTool from './tools/WebSearchTool.vue'
 import ListKbsTool from './tools/ListKbsTool.vue'
 import GetMindmapTool from './tools/GetMindmapTool.vue'
 import QueryKbTool from './tools/QueryKbTool.vue'
+import MediaKnowledgeBaseTool from './tools/MediaKnowledgeBaseTool.vue'
 import KnowledgeGraphTool from './tools/KnowledgeGraphTool.vue'
 import ChartTool from './tools/ChartTool.vue'
 import CalculatorTool from './tools/CalculatorTool.vue'
@@ -126,6 +133,19 @@ const isTaskResult = computed(() => {
     }
   }
   return args && typeof args === 'object' && 'subagent_type' in args
+})
+
+const isKnowledgeBaseResult = computed(() => {
+  const databaseInfo = databases.value.find((db) => db.name === toolName.value)
+  if (databaseInfo && databaseInfo.kb_type !== 'lightrag') {
+    return true
+  }
+  return false
+})
+
+const isMediaKnowledgeBaseResult = computed(() => {
+  const databaseInfo = databases.value.find((db) => db.name === toolName.value)
+  return databaseInfo && databaseInfo.kb_type === 'memeries'
 })
 
 const isKnowledgeGraphResult = computed(() => {

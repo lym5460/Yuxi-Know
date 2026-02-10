@@ -169,6 +169,17 @@ class CommonKnowledgeRetriever(KnowledgeRetrieverModel):
     file_name: str = Field(description="限定文件名称，当操作类型为 'search' 时，可以指定文件名称，支持模糊匹配")
 
 
+class MediaRetrieverModel(BaseModel):
+    """媒体知识库检索器参数模型"""
+
+    query_text: str = Field(description="搜索关键词，用于在音视频内容中进行语义搜索，找到相关的媒体片段。")
+    operation: str = Field(
+        default="search",
+        description="操作类型，默认 'search'，在媒体知识库中搜索相关音视频片段。",
+    )
+
+
+
 def get_kb_based_tools(db_names: list[str] | None = None) -> list:
     """获取所有知识库基于的工具"""
     # 获取所有知识库
@@ -252,31 +263,63 @@ def get_kb_based_tools(db_names: list[str] | None = None) -> list:
 
         return async_retriever_wrapper
 
+    def _create_media_retriever_wrapper(db_id: str, retriever_info: dict[str, Any]):
+        """创建媒体知识库检索器包装函数的工厂函数"""
+
+        async def async_media_retriever_wrapper(query_text: str, operation: str = "search") -> Any:
+            """媒体知识库异步检索器，搜索音视频内容片段"""
+            retriever = retriever_info["retriever"]
+            try:
+                logger.debug(f"Media retrieving from database {db_id} with query: {query_text}")
+                result = await retriever(query_text)
+                logger.debug(f"Media retrieved {len(result) if isinstance(result, list) else 'N/A'} results from {db_id}")
+
+                if not result or (isinstance(result, list) and len(result) == 0):
+                    return (
+                        f"在媒体知识库 {retriever_info['name']} 中没有找到与 '{query_text}' 相关的音视频片段。"
+                        "请尝试使用不同的关键词搜索。"
+                    )
+
+                return result
+            except Exception as e:
+                logger.error(f"Error in media retriever {db_id}: {e}")
+                return f"媒体检索失败: {str(e)}"
+
+        return async_media_retriever_wrapper
+
     for db_id, retrieve_info in retrievers.items():
         if db_ids is not None and db_id not in db_ids:
             continue
 
         try:
-            # 构建工具描述
-            description = (
-                f"使用 {retrieve_info['name']} 知识库的多功能工具。\n"
-                f"知识库描述：{retrieve_info['description'] or '没有描述。'}\n\n"
-                f"支持的操作：\n"
-                f"1. 'search' - 检索知识库内容：根据关键词查询相关文档片段\n"
-                f"2. 'get_mindmap' - 获取思维导图：查看知识库的整体结构和文件分类\n\n"
-                f"使用建议：\n"
-                f"- 需要查询具体内容时，使用 operation='search'\n"
-                f"- 想了解知识库结构、文件分类时，使用 operation='get_mindmap'"
-            )
-
-            # 使用工厂函数创建检索器包装函数，避免闭包问题
-            retriever_wrapper = _create_retriever_wrapper(db_id, retrieve_info)
-
+            kb_type = retrieve_info["metadata"].get("kb_type", "")
             safename = retrieve_info["name"].replace(" ", "_")[:20]
 
-            args_schema = KnowledgeRetrieverModel
-            if retrieve_info["metadata"]["kb_type"] in ["milvus"]:
-                args_schema = CommonKnowledgeRetriever
+            if kb_type == "memeries":
+                # memeries 类型：媒体知识库专用工具
+                description = (
+                    f"使用 {retrieve_info['name']} 媒体知识库搜索音视频内容。\n"
+                    f"知识库描述：{retrieve_info['description'] or '没有描述。'}\n\n"
+                    f"根据关键词在音视频内容中进行语义搜索，返回匹配的媒体片段（包含时间戳和相关性分数）。"
+                )
+                retriever_wrapper = _create_media_retriever_wrapper(db_id, retrieve_info)
+                args_schema = MediaRetrieverModel
+            else:
+                # 其他类型：通用知识库工具
+                description = (
+                    f"使用 {retrieve_info['name']} 知识库的多功能工具。\n"
+                    f"知识库描述：{retrieve_info['description'] or '没有描述。'}\n\n"
+                    f"支持的操作：\n"
+                    f"1. 'search' - 检索知识库内容：根据关键词查询相关文档片段\n"
+                    f"2. 'get_mindmap' - 获取思维导图：查看知识库的整体结构和文件分类\n\n"
+                    f"使用建议：\n"
+                    f"- 需要查询具体内容时，使用 operation='search'\n"
+                    f"- 想了解知识库结构、文件分类时，使用 operation='get_mindmap'"
+                )
+                retriever_wrapper = _create_retriever_wrapper(db_id, retrieve_info)
+                args_schema = KnowledgeRetrieverModel
+                if kb_type == "milvus":
+                    args_schema = CommonKnowledgeRetriever
 
             # 使用 StructuredTool.from_function 创建异步工具
             tool = StructuredTool.from_function(

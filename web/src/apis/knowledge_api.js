@@ -383,6 +383,22 @@ export const typeApi = {
 }
 
 // =============================================================================
+// === 媒体管理分组 ===
+// =============================================================================
+
+export const mediaApi = {
+  /**
+   * 获取媒体文件详情（视频/音频播放地址等）
+   * @param {string} dbId - 知识库ID
+   * @param {string} videoNo - Memeries 视频ID
+   * @returns {Promise} - 媒体详情（含 video_url, duration, resolution_label 等）
+   */
+  getMediaDetails: async (dbId, videoNo) => {
+    return apiAdminGet(`/api/knowledge/databases/${dbId}/media/${videoNo}/details`)
+  }
+}
+
+// =============================================================================
 // === Embedding模型状态检查分组 ===
 // =============================================================================
 

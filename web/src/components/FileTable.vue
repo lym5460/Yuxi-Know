@@ -266,6 +266,14 @@
                   <span class="label">状态:</span>
                   <span class="value">{{ getStatusText(record.status) }}</span>
                 </div>
+                <div v-if="isMemeries && record.media_type" class="info-row">
+                  <span class="label">类型:</span>
+                  <span class="value">{{ record.media_type === 'video' ? '视频' : '音频' }}</span>
+                </div>
+                <div v-if="isMemeries && record.duration != null" class="info-row">
+                  <span class="label">时长:</span>
+                  <span class="value">{{ formatDuration(record.duration) }}</span>
+                </div>
                 <div class="info-row">
                   <span class="label">时间:</span>
                   <span class="value">{{ formatRelativeTime(record.created_at) }}</span>
@@ -277,7 +285,12 @@
               </div>
             </template>
             <a-button class="main-btn" type="link" @click="openFileDetail(record)">
+              <template v-if="isMemeries && record.media_type">
+                <Video v-if="record.media_type === 'video'" :size="16" style="color: #eb2f96; margin-right: 0; flex-shrink: 0" />
+                <Music v-else :size="16" style="color: #13c2c2; margin-right: 0; flex-shrink: 0" />
+              </template>
               <component
+                v-else
                 :is="getFileIcon(record.displayName || text)"
                 :style="{
                   marginRight: '0',
@@ -286,6 +299,9 @@
                 }"
               />
               {{ record.displayName || text }}
+              <span v-if="isMemeries && record.duration != null" class="media-duration">
+                {{ formatDuration(record.duration) }}
+              </span>
             </a-button>
           </a-popover>
         </div>
@@ -376,9 +392,21 @@
                     {{ record.status === 'error_parsing' ? '重试解析' : '解析文件' }}
                   </a-button>
 
-                  <!-- Index Action -->
+                  <!-- Memeries Reprocess Action -->
                   <a-button
-                    v-if="record.status === 'parsed' || record.status === 'error_indexing'"
+                    v-if="isMemeries && record.status === 'error_indexing'"
+                    type="text"
+                    block
+                    @click="handleReprocessMemeriesFile(record)"
+                    :disabled="lock"
+                  >
+                    <template #icon><component :is="h(RefreshCw)" size="14" /></template>
+                    重新处理
+                  </a-button>
+
+                  <!-- Index Action (non-memeries) -->
+                  <a-button
+                    v-if="!isMemeries && (record.status === 'parsed' || record.status === 'error_indexing')"
                     type="text"
                     block
                     @click="handleIndexFile(record)"
@@ -390,7 +418,7 @@
 
                   <!-- Reindex Action -->
                   <a-button
-                    v-if="!isLightRAG && (record.status === 'done' || record.status === 'indexed')"
+                    v-if="!isLightRAG && !isMemeries && (record.status === 'done' || record.status === 'indexed')"
                     type="text"
                     block
                     @click="handleReindexFile(record)"
@@ -443,6 +471,7 @@ import {
   Trash2,
   Download,
   RotateCw,
+  RefreshCw,
   ChevronLast,
   Ellipsis,
   FolderPlus,
@@ -457,6 +486,8 @@ import {
   Filter,
   ArrowUpDown,
   ChevronDown,
+  Video,
+  Music,
   Link
 } from 'lucide-vue-next'
 
@@ -511,6 +542,7 @@ const emit = defineEmits(['showAddFilesModal', 'toggleRightPanel'])
 
 const files = computed(() => Object.values(store.database.files || {}))
 const isLightRAG = computed(() => store.database?.kb_type?.toLowerCase() === 'lightrag')
+const isMemeries = computed(() => store.database?.kb_type?.toLowerCase() === 'memeries')
 const refreshing = computed(() => store.state.refrashing)
 const lock = computed(() => store.state.lock)
 const batchDeleting = computed(() => store.state.batchDeleting)
@@ -1188,8 +1220,18 @@ const handleParseFile = async (record) => {
   await store.parseFiles([record.file_id])
 }
 
+const handleReprocessMemeriesFile = async (record) => {
+  closePopover(record.file_id)
+  await store.indexFiles([record.file_id])
+}
+
 const handleIndexFile = async (record) => {
   closePopover(record.file_id)
+ if (isLightRAG.value) {
+    await store.indexFiles([record.file_id])
+    return
+  }
+  
   // 打开参数配置弹窗
   currentIndexFileIds.value = [record.file_id]
   isBatchIndexOperation.value = false
@@ -1270,7 +1312,7 @@ const handleIndexConfigCancel = () => {
 }
 
 // 导入工具函数
-import { getFileIcon, getFileIconColor, formatRelativeTime } from '@/utils/file_utils'
+import { getFileIcon, getFileIconColor, formatRelativeTime, formatDuration } from '@/utils/file_utils'
 import { parseToShanghai } from '@/utils/time'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 </script>
@@ -1366,6 +1408,17 @@ import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
   font-weight: 600;
   color: var(--color-text);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.my-table .main-btn .media-duration {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gray-400);
+  margin-left: 4px;
+  flex-shrink: 0;
 }
 
 .my-table .main-btn:hover {

@@ -19,10 +19,10 @@
     />
 
     <div class="unified-layout">
-      <div class="left-panel" :style="{ width: leftPanelWidth + '%' }">
+      <div class="left-panel" :style="{ width: isMemeries ? '100%' : leftPanelWidth + '%' }">
         <KnowledgeBaseCard />
         <!-- 待处理文件提示条 -->
-        <div v-if="!isDify && (pendingParseCount > 0 || pendingIndexCount > 0)" class="info-panel">
+        <div v-if="!isMemeries && (!isDify && (pendingParseCount > 0 || pendingIndexCount > 0))" class="info-panel">
           <div class="banner-item" v-if="pendingParseCount > 0" @click="confirmBatchParse">
             <FileText :size="14" />
             <span>{{ pendingParseCount }} 个文件待解析，点击解析</span>
@@ -32,7 +32,12 @@
             <span>{{ pendingIndexCount }} 个文件待入库，点击入库</span>
           </div>
         </div>
+        <MediaCardGrid
+          v-if="isMemeries"
+          @show-add-files-modal="showAddFilesModal"
+        />
         <FileTable
+          v-else
           v-if="!isDify"
           :right-panel-visible="state.rightPanelVisible"
           @show-add-files-modal="showAddFilesModal"
@@ -40,6 +45,7 @@
         />
       </div>
 
+    <template v-if="!isMemeries">
       <div v-if="!isDify" class="resize-handle" ref="resizeHandle"></div>
 
       <div
@@ -131,6 +137,7 @@
           </a-tab-pane>
         </a-tabs>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -153,6 +160,7 @@ import MindMapSection from '@/components/MindMapSection.vue'
 import RAGEvaluationTab from '@/components/RAGEvaluationTab.vue'
 import EvaluationBenchmarks from '@/components/EvaluationBenchmarks.vue'
 import SearchConfigModal from '@/components/SearchConfigModal.vue'
+import MediaCardGrid from '@/components/MediaCardGrid.vue'
 
 const route = useRoute()
 const store = useDatabaseStore()
@@ -172,6 +180,12 @@ const isGraphSupported = computed(() => {
 const isEvaluationSupported = computed(() => {
   const kbType = database.value.kb_type?.toLowerCase()
   return kbType === 'milvus'
+})
+
+// 计算属性：是否为 memeries 知识库
+const isMemeries = computed(() => {
+  const kbType = database.value.kb_type?.toLowerCase()
+  return kbType === 'memeries'
 })
 
 // 计算待解析文件数量（status: 'uploaded'）

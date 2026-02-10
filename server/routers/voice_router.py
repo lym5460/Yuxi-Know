@@ -254,12 +254,31 @@ async def voice_websocket(
     except Exception as e:
         logger.warning(f"加载智能体配置失败，使用默认配置: {e}")
 
+    # 判断是否挂载了 memeries 类型知识库
+    has_memeries_kb = False
+    if knowledges:
+        try:
+            from src.repositories.knowledge_base_repository import KnowledgeBaseRepository
+            kb_repo = KnowledgeBaseRepository()
+            all_kbs = await kb_repo.get_all()
+            kb_type_map = {kb.name: kb.kb_type for kb in all_kbs}
+            has_memeries_kb = any(kb_type_map.get(name) == "memeries" for name in knowledges)
+        except Exception:
+            pass
+
     # 如果配置了知识库，在 system_role 中添加约束
     if knowledges:
-        kb_constraint = (
-            "你需要基于知识库中的内容回答问题。"
-            "如果知识库中没有相关信息，请诚实地说'抱歉，我没有找到相关信息'，不要编造答案。"
-        )
+        if has_memeries_kb:
+            kb_constraint = (
+                "你连接了媒体知识库，当用户要求播放视频或音频时，系统会自动搜索并播放最相关的媒体片段。"
+                "当你收到的外部知识库信息中提到'已找到'或'正在播放'时，请告诉用户已经找到并正在播放相关内容。"
+                "不要说你无法播放视频，因为系统已经在处理了。"
+            )
+        else:
+            kb_constraint = (
+                "你需要基于知识库中的内容回答问题。"
+                "如果知识库中没有相关信息，请诚实地说'抱歉，我没有找到相关信息'，不要编造答案。"
+            )
         if system_role:
             system_role = f"{system_role} {kb_constraint}"
         else:
@@ -341,8 +360,17 @@ async def voice_websocket(
                     logger.info(f"用户说话结束，ASR 文本: {current_asr_text}")
                     await send_status(websocket, VoiceStatus.PROCESSING)
 
-                    # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
-                    if knowledges and current_asr_text:
+                    # 检测关闭媒体播放的意图
+                    if has_memeries_kb and current_asr_text and _is_close_media_query(current_asr_text):
+                        logger.info(f"检测到关闭媒体指令: {current_asr_text}")
+                        await websocket.send_json({
+                            "type": "media_command",
+                            "data": {"action": "stop", "media_id": "", "media_type": "video",
+                                     "media_url": "", "start_time": 0}
+                        })
+                        # 不做 RAG 检索，让豆包自由回答
+                    elif knowledges and current_asr_text:
+                        # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
                         rag_sent = await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
 
                 case EventID.TTS_SENTENCE_START:
@@ -400,6 +428,65 @@ async def voice_websocket(
                     logger.error(f"豆包会话错误: {error_msg}")
                     await send_error(websocket, f"语音服务错误: {error_msg}")
 
+    async def _send_media_commands(results: list[dict]) -> None:
+        """检测 memeries 检索结果中的媒体片段并发送播放指令到前端"""
+        from src.services.media_command import MediaPlayCommand
+
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            # 检测必要的媒体字段
+            media_id = result.get("media_id")
+            media_type = result.get("media_type")
+            start_time = result.get("start_time")
+            if not (media_id and media_type and start_time is not None):
+                continue
+
+            # 构建流式播放 URL（复用已有的 stream 端点）
+            db_id = result.get("db_id", "")
+            file_id = result.get("file_id", "")
+            if db_id and file_id and token:
+                media_url = f"/api/knowledge/databases/{db_id}/documents/{file_id}/stream?token={token}"
+            else:
+                media_url = result.get("media_url", "")
+
+            try:
+                cmd = MediaPlayCommand(
+                    action="play",
+                    media_id=media_id,
+                    media_type=media_type if media_type in ("video", "audio") else "video",
+                    media_url=media_url,
+                    start_time=float(start_time),
+                    end_time=float(result["end_time"]) if result.get("end_time") else None,
+                    description=result.get("media_name"),
+                )
+                await websocket.send_json(cmd.to_ws_message())
+                logger.info(f"已发送媒体播放指令: media_id={media_id}, start_time={start_time}")
+            except Exception as e:
+                logger.warning(f"发送媒体播放指令失败: {e}")
+
+    def _is_media_query(query: str) -> bool:
+        """判断用户查询是否与媒体播放/搜索相关
+
+        通过关键词匹配判断用户意图，避免闲聊（如"今天星期几"）触发媒体检索。
+        """
+        media_keywords = (
+            "播放", "放一下", "放个", "看一下", "看看", "看个",
+            "视频", "音频", "音乐", "歌", "影片", "片段",
+            "搜索", "搜一下", "找一下", "找找", "查一下", "查找",
+            "打开", "听一下", "听听", "听个",
+        )
+        return any(kw in query for kw in media_keywords)
+
+    def _is_close_media_query(query: str) -> bool:
+        """判断用户是否要求关闭/停止正在播放的媒体"""
+        close_keywords = (
+            "关闭视频", "关闭播放", "停止播放", "停止视频",
+            "关掉视频", "关掉播放", "关了吧", "不看了", "不播了",
+            "暂停播放", "暂停视频", "关闭音频", "停止音频",
+        )
+        return any(kw in query for kw in close_keywords)
+
     async def do_rag_retrieval(client: DoubaoRealtimeClient, kb_names: list[str], query: str) -> bool:
         """执行知识库检索并发送结果给豆包
 
@@ -415,7 +502,11 @@ async def voice_websocket(
             return False
 
         # 相关性分数阈值，低于此值的结果视为不相关
-        RELEVANCE_THRESHOLD = 0.5
+        # BY_VIDEO 模式的 score 通常在 0.3~0.6 范围，阈值不宜过高
+        RELEVANCE_THRESHOLD = 0.3
+
+        # 判断是否为媒体相关查询（用于决定是否检索 memeries 知识库）
+        is_media_request = _is_media_query(query)
 
         try:
             from src.knowledge import knowledge_base
@@ -423,16 +514,24 @@ async def voice_websocket(
 
             rag_results = []
 
-            # 获取所有知识库，建立名称到 ID 的映射
+            # 获取所有知识库，建立名称到 (ID, 类型) 的映射
             kb_repo = KnowledgeBaseRepository()
             all_kbs = await kb_repo.get_all()
-            name_to_id = {kb.name: kb.db_id for kb in all_kbs}
+            name_to_kb = {kb.name: {"db_id": kb.db_id, "kb_type": kb.kb_type or "lightrag"} for kb in all_kbs}
 
             for kb_name in kb_names:
-                # 通过名称查找 ID
-                kb_id = name_to_id.get(kb_name)
-                if not kb_id:
+                # 通过名称查找 ID 和类型
+                kb_info = name_to_kb.get(kb_name)
+                if not kb_info:
                     logger.warning(f"知识库 '{kb_name}' 不存在")
+                    continue
+
+                kb_id = kb_info["db_id"]
+                kb_type = kb_info["kb_type"]
+
+                # memeries 知识库：仅在用户意图为媒体播放/搜索时才检索
+                if kb_type == "memeries" and not is_media_request:
+                    logger.info(f"跳过 memeries 知识库 '{kb_name}'，用户查询非媒体相关: {query}")
                     continue
 
                 try:
@@ -442,7 +541,31 @@ async def voice_websocket(
 
                     # 处理不同类型的返回结果
                     if isinstance(results, list):
-                        # Milvus 返回 list[dict]，每个 dict 包含 content, metadata, score
+                        # 检测 memeries 知识库的媒体结果
+                        if kb_type == "memeries":
+                            # 过滤低分结果和缺少 file_id 的结果（无法播放）
+                            media_results = [
+                                r for r in results
+                                if isinstance(r, dict)
+                                and r.get("score", 0) >= RELEVANCE_THRESHOLD
+                                and r.get("file_id")
+                            ]
+                            if media_results:
+                                # 只发送最相关的一个播放指令
+                                await _send_media_commands(media_results[:1])
+                                best = media_results[0]
+                                name = best.get("media_name", "未知媒体")
+                                start = best.get("start_time", 0)
+                                end = best.get("end_time", 0)
+                                content = (
+                                    f"系统已自动为用户播放最相关的媒体片段：{name}，"
+                                    f"时间范围 {start:.0f}s - {end:.0f}s。"
+                                    f"请告诉用户已经找到并正在播放相关视频片段。"
+                                )
+                                rag_results.append({"title": name, "content": content})
+                            continue
+
+                        # Milvus/Memeries 返回 list[dict]，每个 dict 包含 content, metadata, score
                         for i, result in enumerate(results):
                             if isinstance(result, dict):
                                 content = result.get("content") or result.get("text", "")
@@ -514,14 +637,25 @@ async def voice_websocket(
                 logger.info(f"发送 RAG 结果: {len(rag_results)} 条")
                 await client.send_rag_text(rag_results)
                 return True
-            else:
-                # 无相关结果，发送"未找到信息"的提示，让 AI 据此回复
-                logger.info("RAG 检索无相关结果，发送未找到信息提示")
-                await client.send_rag_text([{
-                    "title": "检索结果",
-                    "content": "知识库中没有找到与用户问题相关的信息。请告诉用户：抱歉，我没有找到相关信息。"
-                }])
-                return True
+
+            # 检查是否有非 memeries 类型的知识库被实际检索过
+            # 如果只有 memeries 且被跳过了（非媒体查询），不发送"未找到"提示，让豆包自由回答
+            searched_non_memeries = any(
+                name_to_kb.get(name, {}).get("kb_type") != "memeries"
+                for name in kb_names
+                if name in name_to_kb
+            )
+            if not searched_non_memeries and not is_media_request:
+                logger.info("仅有 memeries 知识库且非媒体查询，跳过 RAG，让豆包自由回答")
+                return False
+
+            # 有非 memeries 知识库被检索但无结果，发送"未找到信息"提示
+            logger.info("RAG 检索无相关结果，发送未找到信息提示")
+            await client.send_rag_text([{
+                "title": "检索结果",
+                "content": "知识库中没有找到与用户问题相关的信息。请告诉用户：抱歉，我没有找到相关信息。"
+            }])
+            return True
 
         except Exception as e:
             logger.warning(f"RAG 检索失败: {e}")
