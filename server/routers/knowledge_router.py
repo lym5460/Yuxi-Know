@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import textwrap
 import traceback
 from urllib.parse import quote, unquote
@@ -14,8 +15,10 @@ from src.services.task_service import TaskContext, tasker
 from server.utils.auth_middleware import get_admin_user, get_required_user
 from src import config, knowledge_base
 from src.knowledge.indexing import SUPPORTED_FILE_EXTENSIONS, is_supported_file_extension, process_file_to_markdown
+from src.services.memeries_service import _validate_file_format as is_supported_media_file
 from src.knowledge.utils import calculate_content_hash
 from src.models.embed import test_all_embedding_models_status, test_embedding_model_status
+from src.storage.postgres.manager import pg_manager
 from src.storage.postgres.models_business import User
 from src.storage.minio.client import StorageError, aupload_file_to_minio, get_minio_client
 from src.utils import logger
@@ -323,68 +326,100 @@ async def add_documents(
                         }
                     )
 
-            # ========== 第二阶段：批量解析文件 ==========
-            await context.set_message("第二阶段：解析文件")
-            parse_success_count = 0
-            # 计算解析阶段的进度范围
-            parse_progress_range = 30.0 if not auto_index else 25.0
+            # 检查是否为 memeries 知识库（跳过解析，直接入库）
+            is_memeries = await _is_memeries_db(db_id)
 
-            for idx, (item, (file_id, add_file_meta)) in enumerate(added_files.items(), 1):
-                await context.raise_if_cancelled()
-
-                # 第二阶段进度：25%~55% 或 30%~60%
-                progress = parse_progress_range + (idx / len(added_files)) * 30.0
-                await context.set_progress(progress, f"[2/2] 解析文件 {idx}/{len(added_files)}")
-
-                try:
-                    # 2. Parse file (PARSING -> PARSED)
-                    file_meta = await knowledge_base.parse_file(db_id, file_id, operator_id=current_user.user_id)
-                    processed_items.append(file_meta)
-                    parse_success_count += 1
-                except Exception as parse_error:
-                    logger.error(f"解析文件失败 {item} (file_id={file_id}): {parse_error}")
-                    error_type = "timeout" if isinstance(parse_error, TimeoutError) else "parse_failed"
-                    error_msg = "解析超时" if isinstance(parse_error, TimeoutError) else "解析失败"
-                    processed_items.append(
-                        {
-                            "item": item,
-                            "status": "failed",
-                            "error": f"{error_msg}: {str(parse_error)}",
-                            "error_type": error_type,
-                        }
-                    )
-
-            # ========== 第三阶段：自动入库 ==========
-            if auto_index:
-                await context.set_message("第三阶段：自动入库")
-                parsed_files = [(item, data) for item, data in added_files.items() if data[1].get("status") == "parsed"]
-                total_parsed = len(parsed_files)
-
-                for idx, (item, (file_id, file_meta)) in enumerate(parsed_files, 1):
+            if is_memeries:
+                # ========== Memeries：直接入库（无需解析） ==========
+                await context.set_message("第二阶段：上传到 Memeries")
+                for idx, (item, (file_id, add_file_meta)) in enumerate(added_files.items(), 1):
                     await context.raise_if_cancelled()
 
-                    # 第三阶段进度：55%~95% 或 60%~95%
-                    progress = 55.0 + (idx / total_parsed) * 40.0
-                    await context.set_progress(progress, f"[3/3] 入库文件 {idx}/{total_parsed}")
+                    progress = 30.0 + (idx / len(added_files)) * 65.0
+                    await context.set_progress(progress, f"[2/2] 入库文件 {idx}/{len(added_files)}")
 
                     try:
-                        # 1. 更新入库参数
-                        await knowledge_base.update_file_params(
-                            db_id, file_id, indexing_params, operator_id=current_user.user_id
-                        )
-                        # 2. 执行入库
                         result = await knowledge_base.index_file(db_id, file_id, operator_id=current_user.user_id)
                         processed_items.append(result)
                     except Exception as index_error:
-                        logger.error(f"自动入库失败 {item} (file_id={file_id}): {index_error}")
+                        logger.error(f"Memeries 入库失败 {item} (file_id={file_id}): {index_error}")
+                        error_type = "timeout" if isinstance(index_error, TimeoutError) else "index_failed"
+                        error_msg = "入库超时" if isinstance(index_error, TimeoutError) else "入库失败"
                         processed_items.append(
                             {
                                 "item": item,
                                 "status": "failed",
-                                "error": f"入库失败: {str(index_error)}",
-                                "error_type": "index_failed",
+                                "error": f"{error_msg}: {str(index_error)}",
+                                "error_type": error_type,
                             }
                         )
+            else:
+                # ========== 第二阶段：批量解析文件 ==========
+                await context.set_message("第二阶段：解析文件")
+                parse_success_count = 0
+                # 计算解析阶段的进度范围
+                parse_progress_range = 30.0 if not auto_index else 25.0
+
+                for idx, (item, (file_id, add_file_meta)) in enumerate(added_files.items(), 1):
+                    await context.raise_if_cancelled()
+
+                    # 第二阶段进度：25%~55% 或 30%~60%
+                    progress = parse_progress_range + (idx / len(added_files)) * 30.0
+                    await context.set_progress(progress, f"[2/2] 解析文件 {idx}/{len(added_files)}")
+
+                    try:
+                        # 2. Parse file (PARSING -> PARSED)
+                        file_meta = await knowledge_base.parse_file(db_id, file_id, operator_id=current_user.user_id)
+                        processed_items.append(file_meta)
+                        parse_success_count += 1
+                    except Exception as parse_error:
+                        logger.error(f"解析文件失败 {item} (file_id={file_id}): {parse_error}")
+                        error_type = "timeout" if isinstance(parse_error, TimeoutError) else "parse_failed"
+                        error_msg = "解析超时" if isinstance(parse_error, TimeoutError) else "解析失败"
+                        processed_items.append(
+                            {
+                                "item": item,
+                                "status": "failed",
+                                "error": f"{error_msg}: {str(parse_error)}",
+                                "error_type": error_type,
+                            }
+                        )
+
+                # ========== 第三阶段：自动入库 ==========
+                if auto_index:
+                    await context.set_message("第三阶段：自动入库")
+                    parsed_files = [
+                        (item, data) for item, data in added_files.items() if data[1].get("status") == "parsed"
+                    ]
+                    total_parsed = len(parsed_files)
+
+                    for idx, (item, (file_id, file_meta)) in enumerate(parsed_files, 1):
+                        await context.raise_if_cancelled()
+
+                        # 第三阶段进度：55%~95% 或 60%~95%
+                        progress = 55.0 + (idx / total_parsed) * 40.0
+                        await context.set_progress(progress, f"[3/3] 入库文件 {idx}/{total_parsed}")
+
+                        try:
+                            # 1. 更新入库参数
+                            await knowledge_base.update_file_params(
+                                db_id, file_id, indexing_params, operator_id=current_user.user_id
+                            )
+                            # 2. 执行入库
+                            result = await knowledge_base.index_file(
+                                db_id, file_id, operator_id=current_user.user_id
+                            )
+                            processed_items.append(result)
+                        except Exception as index_error:
+                            logger.error(f"自动入库失败 {item} (file_id={file_id}): {index_error}")
+                            processed_items.append(
+                                {
+                                    "item": item,
+                                    "status": "failed",
+                                    "error": f"入库失败: {str(index_error)}",
+                                    "error_type": "index_failed",
+                                }
+                            )
 
         except asyncio.CancelledError:
             await context.set_progress(100.0, "任务已取消")
@@ -448,18 +483,23 @@ async def parse_documents(db_id: str, file_ids: list[str] = Body(...), current_u
 
         total = len(file_ids)
         processed_items = []
+        is_memeries = await _is_memeries_db(db_id)
 
         try:
             for idx, file_id in enumerate(file_ids, 1):
                 await context.raise_if_cancelled()
                 progress = 5.0 + (idx / total) * 90.0
-                await context.set_progress(progress, f"正在解析第 {idx}/{total} 个文档")
 
                 try:
-                    result = await knowledge_base.parse_file(db_id, file_id, operator_id=current_user.user_id)
+                    if is_memeries:
+                        await context.set_progress(progress, f"正在入库第 {idx}/{total} 个文件")
+                        result = await knowledge_base.index_file(db_id, file_id, operator_id=current_user.user_id)
+                    else:
+                        await context.set_progress(progress, f"正在解析第 {idx}/{total} 个文档")
+                        result = await knowledge_base.parse_file(db_id, file_id, operator_id=current_user.user_id)
                     processed_items.append(result)
                 except Exception as e:
-                    logger.error(f"Parse failed for {file_id}: {e}")
+                    logger.error(f"Parse/index failed for {file_id}: {e}")
                     processed_items.append({"file_id": file_id, "status": "failed", "error": str(e)})
 
         except Exception as e:
@@ -1088,6 +1128,259 @@ async def move_document(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _is_memeries_db(db_id: str) -> bool:
+    """检查 db_id 对应的知识库是否为 memeries 类型"""
+    from src.repositories.knowledge_base_repository import KnowledgeBaseRepository
+
+    kb = await KnowledgeBaseRepository().get_by_id(db_id)
+    return kb is not None and kb.kb_type == "memeries"
+
+
+@knowledge.get("/databases/{db_id}/documents/{doc_id}/stream")
+async def stream_document(db_id: str, doc_id: str, token: str = Query(...), request: Request = None):
+    """流式播放媒体文件，通过 query param token 认证，支持浏览器原生缓存和 Range 请求"""
+    from jose import JWTError
+    from sqlalchemy import select
+
+    from server.utils.auth_utils import AuthUtils
+
+    # 验证 token
+    try:
+        payload = AuthUtils.verify_access_token(token)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="无效的凭证")
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=401, detail="无效的凭证")
+
+    # 验证用户权限
+    async with pg_manager.get_async_session_context() as db:
+        result = await db.execute(select(User).filter(User.id == int(user_id)))
+        user = result.scalar_one_or_none()
+        if user is None or user.role not in ("admin", "superadmin"):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    try:
+        file_info = await knowledge_base.get_file_basic_info(db_id, doc_id)
+        file_meta = file_info.get("meta", {})
+        file_path = file_meta.get("path", "")
+        filename = file_meta.get("filename", "file")
+
+        _, ext = os.path.splitext(filename)
+        content_type = media_types.get(ext.lower(), "application/octet-stream")
+
+        from src.knowledge.utils.kb_utils import is_minio_url
+
+        if is_minio_url(file_path):
+            from src.knowledge.utils.kb_utils import parse_minio_url
+
+            bucket_name, object_name = parse_minio_url(file_path)
+            minio_client = get_minio_client()
+
+            # 获取文件大小
+            stat = await asyncio.to_thread(
+                minio_client.client.stat_object, bucket_name, object_name
+            )
+            file_size = stat.size
+
+            # 解析 Range 头
+            range_header = request.headers.get("range") if request else None
+            if range_header:
+                # 解析 "bytes=start-end"
+                range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+                if range_match:
+                    start = int(range_match.group(1))
+                    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+                    end = min(end, file_size - 1)
+                    length = end - start + 1
+
+                    minio_response = await asyncio.to_thread(
+                        minio_client.client.get_object,
+                        bucket_name, object_name, offset=start, length=length,
+                    )
+
+                    async def range_stream():
+                        try:
+                            while True:
+                                chunk = await asyncio.to_thread(minio_response.read, 65536)
+                                if not chunk:
+                                    break
+                                yield chunk
+                        finally:
+                            minio_response.close()
+                            minio_response.release_conn()
+
+                    return StreamingResponse(
+                        range_stream(),
+                        status_code=206,
+                        media_type=content_type,
+                        headers={
+                            "Content-Range": f"bytes {start}-{end}/{file_size}",
+                            "Content-Length": str(length),
+                            "Accept-Ranges": "bytes",
+                            "Cache-Control": "private, max-age=3600",
+                        },
+                    )
+
+            # 无 Range：返回完整文件
+            minio_response = await minio_client.adownload_response(
+                bucket_name=bucket_name, object_name=object_name,
+            )
+
+            async def full_stream():
+                try:
+                    while True:
+                        chunk = await asyncio.to_thread(minio_response.read, 65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    minio_response.close()
+                    minio_response.release_conn()
+
+            return StreamingResponse(
+                full_stream(),
+                media_type=content_type,
+                headers={
+                    "Content-Length": str(file_size),
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "private, max-age=3600",
+                },
+            )
+
+        else:
+            # 本地文件
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail="文件不存在")
+
+            file_size = os.path.getsize(file_path)
+            range_header = request.headers.get("range") if request else None
+
+            if range_header:
+                range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+                if range_match:
+                    start = int(range_match.group(1))
+                    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+                    end = min(end, file_size - 1)
+                    length = end - start + 1
+
+                    async def local_range_stream():
+                        async with aiofiles.open(file_path, "rb") as f:
+                            await f.seek(start)
+                            remaining = length
+                            while remaining > 0:
+                                chunk_size = min(65536, remaining)
+                                chunk = await f.read(chunk_size)
+                                if not chunk:
+                                    break
+                                remaining -= len(chunk)
+                                yield chunk
+
+                    return StreamingResponse(
+                        local_range_stream(),
+                        status_code=206,
+                        media_type=content_type,
+                        headers={
+                            "Content-Range": f"bytes {start}-{end}/{file_size}",
+                            "Content-Length": str(length),
+                            "Accept-Ranges": "bytes",
+                            "Cache-Control": "private, max-age=3600",
+                        },
+                    )
+
+            async def local_full_stream():
+                async with aiofiles.open(file_path, "rb") as f:
+                    while True:
+                        chunk = await f.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+
+            return StreamingResponse(
+                local_full_stream(),
+                media_type=content_type,
+                headers={
+                    "Content-Length": str(file_size),
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "private, max-age=3600",
+                },
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"流式播放失败: {e}, {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"播放失败: {e}")
+
+
+@knowledge.get("/databases/{db_id}/media/{video_no}/details")
+async def get_media_details(db_id: str, video_no: str, current_user: User = Depends(get_admin_user)):
+    """获取媒体文件详情（代理 Memeries get_private_video_details API）"""
+    if not await _is_memeries_db(db_id):
+        raise HTTPException(status_code=400, detail="Not a memeries knowledge base")
+
+    from src.services.memeries_service import get_memeries_service
+
+    memeries_service = get_memeries_service()
+    if not memeries_service.is_configured():
+        raise HTTPException(status_code=503, detail="Memeries API is not configured")
+
+    try:
+        result = await memeries_service.get_video_details(video_no=video_no, unique_id=db_id)
+        data = result.get("data", result)
+        return data
+    except Exception as e:
+        logger.error(f"Failed to get media details for {video_no}: {e}")
+        raise HTTPException(status_code=500, detail=f"获取媒体详情失败: {e}")
+
+
+@knowledge.post("/memeries/callback")
+async def memeries_callback(request: Request):
+    """接收 Memeries API 的视频处理状态回调
+
+    Memeries 处理完视频后会 POST 到此端点：
+    {"videoNo": "VI...", "status": "PARSE"/"FAIL"/"UNPARSE"}
+    """
+    from src.knowledge.base import FileStatus
+    from src.utils.datetime_utils import utc_isoformat
+
+    body = await request.json()
+    video_no = body.get("videoNo")
+    status = body.get("status")
+
+    logger.info(f"Memeries callback received: videoNo={video_no}, status={status}")
+
+    if not video_no or not status:
+        return {"message": "ok"}
+
+    status_mapping = {
+        "UNPARSE": FileStatus.INDEXING,
+        "PARSE": FileStatus.INDEXED,
+        "FAIL": FileStatus.ERROR_INDEXING,
+    }
+    new_status = status_mapping.get(status)
+    if not new_status:
+        return {"message": "ok"}
+
+    # 遍历所有 memeries KB 实例查找匹配的 videoNo
+    kb_instance = knowledge_base._get_or_create_kb_instance("memeries")
+    for file_id, file_meta in kb_instance.files_meta.items():
+        if file_meta.get("memeries_video_no") == video_no:
+            old_status = file_meta.get("status")
+            if old_status != new_status:
+                kb_instance.files_meta[file_id]["status"] = new_status
+                kb_instance.files_meta[file_id]["updated_at"] = utc_isoformat()
+                if new_status == FileStatus.ERROR_INDEXING:
+                    kb_instance.files_meta[file_id]["error"] = body.get("cause", "Memeries processing failed")
+                elif "error" in kb_instance.files_meta[file_id]:
+                    kb_instance.files_meta[file_id].pop("error", None)
+                await kb_instance._save_metadata()
+                logger.info(f"Updated file {file_id} status via callback: {old_status} -> {new_status}")
+            break
+
+    return {"message": "ok"}
+
+
 @knowledge.post("/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -1107,7 +1400,9 @@ async def upload_file(
         if allow_jsonl is not True or db_id is not None:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
     elif not (is_supported_file_extension(file.filename) or ext == ".zip"):
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+        # memeries 类型知识库允许媒体文件
+        if not (db_id and await _is_memeries_db(db_id) and is_supported_media_file(file.filename)):
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
 
     basename, ext = os.path.splitext(file.filename)
     # 直接使用原始文件名（小写）

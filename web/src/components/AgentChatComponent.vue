@@ -133,6 +133,28 @@
                 <p class="voice-hint">{{ voiceHintText }}</p>
               </div>
             </div>
+
+            <!-- 语音模式媒体播放器模态框 -->
+            <a-modal
+              v-model:open="mediaPlayerVisible"
+              :title="currentMediaCommand?.description || '媒体播放'"
+              :width="currentMediaCommand?.media_type === 'video' ? '80vw' : '480px'"
+              :footer="null"
+              :destroy-on-close="true"
+              :centered="true"
+              :body-style="{ padding: '12px' }"
+            >
+              <MediaPlayer
+                v-if="currentMediaCommand"
+                :media-url="currentMediaCommand.media_url"
+                :media-type="currentMediaCommand.media_type"
+                :start-time="currentMediaCommand.start_time"
+                :end-time="currentMediaCommand.end_time"
+                :media-name="currentMediaCommand.media_name"
+                :description="currentMediaCommand.description"
+                :fullscreen-mode="true"
+              />
+            </a-modal>
           </template>
 
           <!-- 文本模式 - 原有布局 -->
@@ -286,6 +308,7 @@ import { useApproval } from '@/composables/useApproval'
 import { useAgentStreamHandler } from '@/composables/useAgentStreamHandler'
 import AgentPanel from '@/components/AgentPanel.vue'
 import AudioVisualizer from '@/components/voice/AudioVisualizer.vue'
+import MediaPlayer from '@/components/MediaPlayer.vue'
 import { createVoiceWebSocket, sendAudio, sendControl, getVoiceMessages, saveVoiceMessage } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
@@ -1108,6 +1131,10 @@ const voiceAudioLevel = ref(0)
 const voiceMessagesContainer = ref(null)
 let voiceWs = null
 
+// 媒体播放器状态（语音模式下的 media_command 播放）
+const mediaPlayerVisible = ref(false)
+const currentMediaCommand = ref(null)
+
 // 语音消息存储在 threadState 中，这里用计算属性访问
 const voiceMessages = computed(() => {
   const threadState = getThreadState(currentChatId.value)
@@ -1328,6 +1355,43 @@ function handleVoiceMessage(msg) {
       // 音频接收完成（PCM 流式播放不需要 flush）
       // 不改变状态，等待后端发送 status 消息
       break
+    case 'media_command': {
+      // 媒体播放指令处理
+      const data = msg.data
+      const validActions = ['play', 'pause', 'seek', 'stop']
+      if (!data || !validActions.includes(data.action)) {
+        console.warn('[media_command] 无效的播放指令，已忽略:', msg)
+        break
+      }
+
+      // stop 指令：关闭播放器
+      if (data.action === 'stop') {
+        mediaPlayerVisible.value = false
+        currentMediaCommand.value = null
+        break
+      }
+
+      if (
+        !data.media_id ||
+        !data.media_type ||
+        !data.media_url ||
+        data.start_time === undefined ||
+        data.start_time === null
+      ) {
+        console.warn('[media_command] 无效的播放指令，已忽略:', msg)
+        break
+      }
+      currentMediaCommand.value = {
+        media_url: data.media_url,
+        media_type: data.media_type,
+        start_time: Number(data.start_time),
+        end_time: data.end_time != null ? Number(data.end_time) : undefined,
+        media_name: data.media_id,
+        description: data.description || ''
+      }
+      mediaPlayerVisible.value = true
+      break
+    }
     case 'error':
       console.error('Voice error:', msg.error)
       message.error(msg.error || '语音服务出错')

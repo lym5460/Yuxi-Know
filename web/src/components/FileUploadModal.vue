@@ -35,7 +35,7 @@
       <!-- 2. 配置面板 -->
       <div class="settings-panel">
         <!-- 第一行：存储位置 + OCR 引擎 -->
-        <div class="setting-row two-cols">
+        <div :class="['setting-row', { 'two-cols': !isMemeries }]">
           <div class="col-item">
             <div class="setting-label">存储位置</div>
             <div class="setting-content flex-row">
@@ -54,7 +54,7 @@
             </div>
             <p class="param-description">选择文件保存的目标文件夹</p>
           </div>
-          <div class="col-item">
+          <div class="col-item" v-if="!isMemeries">
             <div class="setting-label">
               OCR 引擎
               <a-tooltip title="检查服务状态">
@@ -90,7 +90,7 @@
         </div>
 
         <!-- 第三行：自动入库配置 -->
-        <div class="setting-row">
+        <div class="setting-row" v-if="!isMemeries">
           <div class="col-item">
             <div class="setting-label">
               <a-checkbox v-model:checked="autoIndex">上传后自动入库</a-checkbox>
@@ -111,7 +111,7 @@
       </div>
 
       <!-- PDF/图片OCR提醒 (Alert样式优化) -->
-      <div v-if="hasPdfOrImageFiles && !isOcrEnabled" class="inline-alert warning">
+      <div v-if="!isMemeries && hasPdfOrImageFiles && !isOcrEnabled" class="inline-alert warning">
         <Info :size="16" />
         <span>检测到PDF或图片文件，建议启用 OCR 以提取文本内容</span>
       </div>
@@ -239,11 +239,13 @@ watch(
       selectedFolderId.value = props.currentFolderId
       isFolderUpload.value = props.isFolderMode
       uploadMode.value = props.isFolderMode ? 'folder' : 'file'
+      loadSupportedFileTypes()
     }
   }
 )
 
 const DEFAULT_SUPPORTED_TYPES = ['.txt', '.pdf', '.jpg', '.jpeg', '.md', '.docx']
+const MEDIA_SUPPORTED_TYPES = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg']
 
 const normalizeExtensions = (extensions) => {
   if (!Array.isArray(extensions)) {
@@ -273,7 +275,9 @@ const acceptedFileTypes = computed(() => {
     return ''
   }
   const exts = new Set(supportedFileTypes.value)
-  exts.add('.zip')
+  if (!isMemeries.value) {
+    exts.add('.zip')
+  }
   return Array.from(exts).join(',')
 })
 
@@ -282,7 +286,9 @@ const uploadHint = computed(() => {
     return '加载中...'
   }
   const exts = new Set(supportedFileTypes.value)
-  exts.add('.zip')
+  if (!isMemeries.value) {
+    exts.add('.zip')
+  }
   return Array.from(exts).join(', ')
 })
 
@@ -298,10 +304,16 @@ const isSupportedExtension = (fileName) => {
     return false
   }
   const ext = fileName.slice(lastDotIndex).toLowerCase()
-  return supportedFileTypes.value.includes(ext) || ext === '.zip'
+  if (!isMemeries.value && ext === '.zip') return true
+  return supportedFileTypes.value.includes(ext)
 }
 
 const loadSupportedFileTypes = async () => {
+  // memeries 类型知识库使用媒体文件格式
+  if (kbType.value === 'memeries') {
+    applySupportedFileTypes(MEDIA_SUPPORTED_TYPES)
+    return
+  }
   try {
     const data = await fileApi.getSupportedFileTypes()
     applySupportedFileTypes(data?.file_types)
@@ -312,10 +324,6 @@ const loadSupportedFileTypes = async () => {
   }
 }
 
-onMounted(() => {
-  loadSupportedFileTypes()
-})
-
 const visible = computed({
   get: () => props.visible,
   set: (value) => emit('update:visible', value)
@@ -323,6 +331,15 @@ const visible = computed({
 
 const databaseId = computed(() => store.databaseId)
 const kbType = computed(() => store.database.kb_type)
+
+onMounted(() => {
+  loadSupportedFileTypes()
+})
+
+// kbType 可能在 onMounted 之后才从 store 加载完成，需要 watch 重新设置
+watch(kbType, () => {
+  loadSupportedFileTypes()
+})
 const chunkLoading = computed(() => store.state.chunkLoading)
 
 // 上传模式
@@ -395,6 +412,10 @@ const isQaSplitSupported = computed(() => {
 const isGraphBased = computed(() => {
   const type = kbType.value?.toLowerCase()
   return type === 'lightrag'
+})
+
+const isMemeries = computed(() => {
+  return kbType.value === 'memeries'
 })
 
 const isFolderUpload = ref(false)

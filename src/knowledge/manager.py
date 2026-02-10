@@ -401,7 +401,10 @@ class KnowledgeBaseManager:
 
         try:
             kb_instance = await self._get_kb_for_database(db_id)
-            db_info = kb_instance.get_database_info(db_id)
+            if hasattr(kb_instance, "async_get_database_info"):
+                db_info = await kb_instance.async_get_database_info(db_id)
+            else:
+                db_info = kb_instance.get_database_info(db_id)
         except KBNotFoundError:
             db_info = {
                 "db_id": db_id,

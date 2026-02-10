@@ -10,3 +10,6 @@ export { default as CalculatorTool } from './tools/CalculatorTool.vue'
 export { default as TodoListTool } from './tools/TodoListTool.vue'
 export { default as ImageTool } from './tools/ImageTool.vue'
 export { default as WriteFileTool } from './tools/WriteFileTool.vue'
+
+// 媒体结果卡片组件
+export { default as MediaResultCard } from './MediaResultCard.vue'

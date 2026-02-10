@@ -5,6 +5,9 @@
   <!-- 网页搜索 -->
   <WebSearchTool v-else-if="isWebSearchResult" :tool-call="toolCall" />
 
+  <!-- 媒体知识库 -->
+  <MediaKnowledgeBaseTool v-else-if="isMediaKnowledgeBaseResult" :tool-call="toolCall" />
+
   <!-- 知识库 -->
   <KnowledgeBaseTool v-else-if="isKnowledgeBaseResult" :tool-call="toolCall" />
 
@@ -35,6 +38,7 @@ import { useDatabaseStore } from '@/stores/database'
 
 import WebSearchTool from './tools/WebSearchTool.vue'
 import KnowledgeBaseTool from './tools/KnowledgeBaseTool.vue'
+import MediaKnowledgeBaseTool from './tools/MediaKnowledgeBaseTool.vue'
 import KnowledgeGraphTool from './tools/KnowledgeGraphTool.vue'
 import CalculatorTool from './tools/CalculatorTool.vue'
 import TodoListTool from './tools/TodoListTool.vue'
@@ -96,6 +100,11 @@ const isKnowledgeBaseResult = computed(() => {
     return true
   }
   return false
+})
+
+const isMediaKnowledgeBaseResult = computed(() => {
+  const databaseInfo = databases.value.find((db) => db.name === toolName.value)
+  return databaseInfo && databaseInfo.kb_type === 'memeries'
 })
 
 const isKnowledgeGraphResult = computed(() => {

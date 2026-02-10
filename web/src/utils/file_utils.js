@@ -7,7 +7,9 @@ import {
   FileExcelFilled,
   FileImageFilled,
   FileUnknownFilled,
-  FilePptFilled
+  FilePptFilled,
+  PlaySquareFilled,
+  SoundFilled
 } from '@ant-design/icons-vue'
 import { formatRelative, parseToShanghai } from '@/utils/time'
 
@@ -54,7 +56,22 @@ export const getFileIcon = (filename) => {
 
     // HTML文件
     html: FileTextFilled,
-    htm: FileTextFilled
+    htm: FileTextFilled,
+
+    // 视频文件
+    mp4: PlaySquareFilled,
+    avi: PlaySquareFilled,
+    mov: PlaySquareFilled,
+    mkv: PlaySquareFilled,
+    webm: PlaySquareFilled,
+
+    // 音频文件
+    mp3: SoundFilled,
+    wav: SoundFilled,
+    m4a: SoundFilled,
+    flac: SoundFilled,
+    aac: SoundFilled,
+    ogg: SoundFilled
   }
 
   return iconMap[extension] || FileUnknownFilled
@@ -103,7 +120,22 @@ export const getFileIconColor = (filename) => {
 
     // HTML文件 - 橙色
     html: '#fa8c16',
-    htm: '#fa8c16'
+    htm: '#fa8c16',
+
+    // 视频文件 - 品红色
+    mp4: '#eb2f96',
+    avi: '#eb2f96',
+    mov: '#eb2f96',
+    mkv: '#eb2f96',
+    webm: '#eb2f96',
+
+    // 音频文件 - 青色
+    mp3: '#13c2c2',
+    wav: '#13c2c2',
+    m4a: '#13c2c2',
+    flac: '#13c2c2',
+    aac: '#13c2c2',
+    ogg: '#13c2c2'
   }
 
   return colorMap[extension] || '#8c8c8c'
@@ -138,4 +170,14 @@ export const formatFileSize = (bytes) => {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+// 格式化媒体时长（秒 → mm:ss）
+export const formatDuration = (seconds) => {
+  if (seconds === null || seconds === undefined || seconds === '') return ''
+  const num = Number(seconds)
+  if (isNaN(num) || num < 0) return ''
+  const mins = Math.floor(num / 60)
+  const secs = Math.floor(num % 60)
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
