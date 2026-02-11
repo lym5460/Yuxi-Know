@@ -52,6 +52,7 @@ cache
 *.local.py
 *.local.js
 *.local.yaml
+!src/config/static/info.local.yaml
 
 
 *.pdf
