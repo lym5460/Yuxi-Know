@@ -30,13 +30,8 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
-      # 豆包端到端语音
-      - DOUBAO_APP_ID=${DOUBAO_APP_ID:-}
-      - DOUBAO_ACCESS_KEY=${DOUBAO_ACCESS_KEY:-}
-      # Memeries 音视频知识库
-      - MEMERIES_API_ENDPOINT=${MEMERIES_API_ENDPOINT:-}
-      - MEMERIES_API_KEY=${MEMERIES_API_KEY:-}
-      - MEMERIES_CALLBACK_URL=${MEMERIES_CALLBACK_URL:-}
+      # 豆包端到端语音（从 env_file 继承）
+      # Memeries 音视频知识库（从 env_file 继承）
       # 清空代理配置，容器内不使用代理
       - HTTP_PROXY=
       - HTTPS_PROXY=
