@@ -34,6 +34,13 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
+      # 豆包端到端语音
+      - DOUBAO_APP_ID=${DOUBAO_APP_ID:-}
+      - DOUBAO_ACCESS_KEY=${DOUBAO_ACCESS_KEY:-}
+      # Memeries 音视频知识库
+      - MEMERIES_API_ENDPOINT=${MEMERIES_API_ENDPOINT:-}
+      - MEMERIES_API_KEY=${MEMERIES_API_KEY:-}
+      - MEMERIES_CALLBACK_URL=${MEMERIES_CALLBACK_URL:-}
       # 清空代理配置，容器内不使用代理
       - HTTP_PROXY=
       - HTTPS_PROXY=
@@ -215,8 +222,6 @@ services:
   postgres:
     image: postgres:16
     container_name: postgres
-    ports:
-      - "5432:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -255,9 +260,10 @@ services:
     image: mineru-vllm:latest
     container_name: mineru-vllm-server
     profiles:
+      - ocr
       - all
     env_file:
-      - .env
+      - .env.prod
     environment:
       MINERU_MODEL_SOURCE: local
     entrypoint: mineru-vllm-server
@@ -288,9 +294,10 @@ services:
     image: mineru-vllm:latest
     container_name: mineru-api
     profiles:
+      - ocr
       - all
     env_file:
-      - .env
+      - .env.prod
     ports:
       - 30001:30001
     environment:
@@ -303,6 +310,13 @@ services:
       memlock: -1
       stack: 67108864
     ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: [ "0" ]
+              capabilities: [ gpu ]
     restart: unless-stopped
     networks:
       - app-network
@@ -314,6 +328,7 @@ services:
     image: paddlex:latest
     container_name: paddlex-ocr
     profiles:
+      - paddlex
       - all
     volumes:
       - ./docker/volumes/paddlex:/paddlex
@@ -338,6 +353,7 @@ services:
     image: fedirz/faster-whisper-server:latest-cuda
     container_name: whisper-asr
     profiles:
+      - asr
       - all
     ports:
       - "8100:8000"
