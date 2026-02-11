@@ -1,0 +1,38 @@
+# 单位信息配置文件
+# 用于配置网站的基本信息、品牌信息等
+
+# 组织信息
+organization:
+  name: "KGRAG"  # 完整组织名称
+  logo: "/gdi.svg"                    # Logo文件路径（放在 web/public 目录下）
+  avatar: "/gdi.svg"                   # 头像文件路径（放在 web/public 目录下）
+  login_bg: "/login-bg.jpg"               # 登录背景图片路径（放在 web/public 目录下）
+
+# 项目信息
+branding:
+  name: "GDI-KGRAG"
+  title: "GDI-KGRAG: 更智能的知识库智能体平台"     # 系统标题
+  subtitle: "大模型驱动的知识库智能体平台"          # 副标题
+
+features:
+  - label: "知识库数量"
+    value: "100+"
+    description: "支持多个知识库并行管理"
+    icon: "default"
+  - label: "智能体类型"
+    value: "4+"
+    description: "多种智能体满足不同场景需求" 
+    icon: "resolved"
+  - label: "文档处理"
+    value: "高效"
+    description: "支持多种文档格式智能解析"
+    icon: "commits"
+
+# actions:
+#   - name: "文档中心"
+#     icon: "docs"
+#     url: "/docs"
+
+# 页脚信息
+footer:
+  copyright: "© 上海曼恒数字技术股份有限公司 2026"
