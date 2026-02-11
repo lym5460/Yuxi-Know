@@ -215,6 +215,7 @@ services:
     image: mineru-vllm:latest
     container_name: mineru-vllm-server
     profiles:
+      - ocr
       - all
     env_file:
       - .env
@@ -253,6 +254,7 @@ services:
     image: mineru-vllm:latest
     container_name: mineru-api
     profiles:
+      - ocr
       - all
     env_file:
       - .env
@@ -279,6 +281,7 @@ services:
     image: paddlex:latest
     container_name: paddlex-ocr
     profiles:
+      - paddlex
       - all
     volumes:
       - ./docker/volumes/paddlex:/paddlex
@@ -306,6 +309,7 @@ services:
     image: fedirz/faster-whisper-server:latest-cuda
     container_name: whisper-asr
     profiles:
+      - asr
       - all
     ports:
       - "8100:8000"
