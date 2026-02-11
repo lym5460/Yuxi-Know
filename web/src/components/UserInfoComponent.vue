@@ -40,12 +40,12 @@
           </a-menu-item>
           <a-menu-divider v-if="userStore.isAdmin" />
           <a-menu-item
-            v-if="userStore.isSuperAdmin"
+            v-if="userStore.isSuperAdmin && !isProd"
             key="debug"
             @click="showDebug = true"
             :icon="TerminalIcon"
           >
-            <span class="menu-text">调试面板（非生产环境）</span>
+            <span class="menu-text">调试面板</span>
           </a-menu-item>
           <a-menu-item
             v-if="userStore.isAdmin"
@@ -211,7 +211,8 @@ const TerminalIcon = h(Terminal, { size: '16' })
 const SettingsIcon = h(Settings, { size: '16' })
 const LogOutIcon = h(LogOut, { size: '16' })
 
-// 调试面板状态
+// 调试面板状态（仅非生产环境显示）
+const isProd = import.meta.env.PROD
 const showDebug = ref(false)
 
 // Inject settings modal methods
