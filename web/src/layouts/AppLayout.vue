@@ -26,6 +26,7 @@ const layoutSettings = reactive({
 })
 
 // Add state for debug modal
+const isProd = import.meta.env.PROD
 const showDebugModal = ref(false)
 
 // Add state for settings modal
@@ -157,7 +158,8 @@ provide('settingsModal', {
       <component :is="Component" v-else />
     </router-view>
 
-    <!-- Debug Modal -->
+    <!-- Debug Modal (dev only) -->
+    <template v-if="!isProd">
     <a-modal
       v-model:open="showDebugModal"
       title="调试面板"
@@ -170,6 +172,7 @@ provide('settingsModal', {
     >
       <DebugComponent />
     </a-modal>
+    </template>
     <TaskCenterDrawer />
     <SettingsModal v-model:visible="showSettingsModal" @close="() => (showSettingsModal = false)" />
   </div>
