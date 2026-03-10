@@ -167,7 +167,6 @@ import {
 import BasicSettingsSection from '@/components/BasicSettingsSection.vue'
 import ModelProvidersComponent from '@/components/ModelProvidersComponent.vue'
 import UserManagementComponent from '@/components/UserManagementComponent.vue'
-import McpServersComponent from '@/components/McpServersComponent.vue'
 import DepartmentManagementComponent from '@/components/DepartmentManagementComponent.vue'
 import ApiKeyManagementComponent from '@/components/ApiKeyManagementComponent.vue'
 

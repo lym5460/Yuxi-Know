@@ -640,7 +640,6 @@ const goToDatabasePage = () => {
 .db-selector {
   display: flex;
   align-items: center;
-  margin-right: 20px;
 
   .label {
     font-size: 14px;
@@ -777,7 +776,7 @@ const goToDatabasePage = () => {
   }
 
   :deep(.ant-input) {
-    padding: 2px 10px;
+    padding: 2px 0px;
   }
 
   button {

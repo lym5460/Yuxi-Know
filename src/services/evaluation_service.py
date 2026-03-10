@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import re
@@ -6,6 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from src import config
 from src.knowledge import knowledge_base
 from src.models import select_model
 from src.repositories.evaluation_repository import EvaluationRepository
@@ -232,6 +232,29 @@ class EvaluationService:
             logger.error(f"获取评估基准详情失败: {e}")
             raise
 
+    async def get_benchmark_download_info(self, benchmark_id: str) -> dict[str, str]:
+        """获取评估基准下载信息"""
+        row = await self.eval_repo.get_benchmark(benchmark_id)
+        if row is None:
+            raise ValueError("Benchmark not found")
+
+        data_file_path = row.data_file_path or ""
+        if not data_file_path or not os.path.exists(data_file_path):
+            raise ValueError("Benchmark file not found")
+
+        filename_base = (row.name or "").strip()
+        if not filename_base:
+            filename_base = row.benchmark_id
+
+        filename_base = re.sub(r"[\\/:*?\"<>|]+", "_", filename_base).strip()
+        if not filename_base or filename_base in {".", ".."}:
+            filename_base = row.benchmark_id
+
+        if not filename_base.endswith(".jsonl"):
+            filename_base = f"{filename_base}.jsonl"
+
+        return {"file_path": data_file_path, "filename": filename_base}
+
     async def delete_benchmark(self, benchmark_id: str) -> None:
         """删除评估基准"""
         try:
@@ -323,9 +346,9 @@ class EvaluationService:
 
         await context.set_progress(15, "向量化")
 
+        db_meta = kb_instance.databases_meta.get(db_id, {})
+        embed_info = db_meta.get("embed_info", {})
         if not embedding_model_id:
-            db_meta = kb_instance.databases_meta.get(db_id, {})
-            embed_info = db_meta.get("embed_info", {})
             embedding_model_id = embed_info.get("name") or embed_info.get("model") or ""
         if not embedding_model_id:
             raise ValueError("Embedding model not specified")
@@ -333,11 +356,14 @@ class EvaluationService:
         from src.models import select_embedding_model, select_model
 
         embed_model = select_embedding_model(embedding_model_id)
+        batch_size = int(getattr(embed_model, "batch_size", 40) or 40)
+        if embedding_model_id in config.embed_model_names:
+            batch_size = config.embed_model_names[embedding_model_id].batch_size
         # TODO: Performance Optimization
         # Currently, we re-calculate embeddings for ALL chunks in the KB for every benchmark generation.
         # This is inefficient for large KBs (O(N) embedding calls).
         # Optimization: Reuse existing embeddings from Vector DB if embedding_model_id matches the KB's embedding model.
-        embeddings = await embed_model.abatch_encode(contents, batch_size=40)
+        embeddings = await embed_model.abatch_encode(contents, batch_size=batch_size)
         norms = [math.sqrt(sum(x * x for x in vec)) or 1.0 for vec in embeddings]
 
         def cosine(a, b, na, nb):
@@ -390,7 +416,7 @@ class EvaluationService:
                 )
 
                 try:
-                    resp = await asyncio.to_thread(llm.call, prompt, False)
+                    resp = await llm.call(prompt, False)
                     content = resp.content if resp else ""
 
                     import json_repair
@@ -606,8 +632,8 @@ class EvaluationService:
                             "如果上下文中缺少相关信息，请回答“信息不足，无法回答”。\n\n"
                         )
 
-                        # 生成答案 - 使用 asyncio.to_thread 避免阻塞事件循环
-                        response = await asyncio.to_thread(llm.call, prompt, stream=False)
+                        # 生成答案
+                        response = await llm.call(prompt, stream=False)
                         generated_answer = response.content if response else ""
                         logger.debug(f"LLM 生成的答案长度: {len(generated_answer) if generated_answer else 0}")
 
@@ -629,9 +655,8 @@ class EvaluationService:
 
                 if benchmark_row.has_gold_answers and question_data.get("gold_answer"):
                     if judge_llm:
-                        # 评判过程包含 LLM 调用，使用 asyncio.to_thread 避免阻塞
-                        answer_scores = await asyncio.to_thread(
-                            EvaluationMetricsCalculator.calculate_answer_metrics,
+                        # 评判过程包含 LLM 调用
+                        answer_scores = await EvaluationMetricsCalculator.calculate_answer_metrics(
                             query=question_data["query"],
                             generated_answer=generated_answer,
                             gold_answer=question_data["gold_answer"],

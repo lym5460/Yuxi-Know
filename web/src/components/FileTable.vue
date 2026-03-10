@@ -24,6 +24,13 @@
               >
                 上传文件夹
               </a-menu-item>
+              <a-menu-item
+                key="upload-url"
+                @click="showAddFilesModal({ mode: 'url' })"
+                :icon="h(Link, { size: 16 })"
+              >
+                解析 URL
+              </a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -182,7 +189,14 @@
         <a-button key="submit" type="primary" @click="handleIndexConfigConfirm">确定</a-button>
       </template>
       <div class="index-params">
-        <ChunkParamsConfig :temp-chunk-params="indexParams" :show-qa-split="true" />
+        <ChunkParamsConfig
+          :temp-chunk-params="indexParams"
+          :show-qa-split="true"
+          :show-chunk-size-overlap="!isLightRAG"
+          :show-preset="true"
+          :allow-preset-follow-default="true"
+          :database-preset-id="store.database?.additional_params?.chunk_preset_id || 'general'"
+        />
       </div>
     </a-modal>
 
@@ -358,6 +372,7 @@
                     @click="handleDownloadFile(record)"
                     :disabled="
                       lock ||
+                      record.file_type === 'url' ||
                       !['done', 'indexed', 'parsed', 'error_indexing'].includes(record.status)
                     "
                   >
@@ -472,7 +487,8 @@ import {
   ArrowUpDown,
   ChevronDown,
   Video,
-  Music
+  Music,
+  Link
 } from 'lucide-vue-next'
 
 const store = useDatabaseStore()
@@ -727,8 +743,25 @@ const indexConfigModalTitle = ref('入库参数配置')
 const indexParams = ref({
   chunk_size: 1000,
   chunk_overlap: 200,
-  qa_separator: ''
+  qa_separator: '',
+  chunk_preset_id: ''
 })
+const buildIndexParamsPayload = () => {
+  const payload = {}
+  if (indexParams.value.chunk_preset_id) {
+    payload.chunk_preset_id = indexParams.value.chunk_preset_id
+  }
+
+  if (isLightRAG.value) {
+    payload.qa_separator = indexParams.value.qa_separator || ''
+    return payload
+  }
+
+  return {
+    ...indexParams.value,
+    ...payload
+  }
+}
 const currentIndexFileIds = ref([])
 const isBatchIndexOperation = ref(false)
 
@@ -863,7 +896,10 @@ const buildFileTree = (fileList) => {
     const normalizedName = file.filename.replace(/\\/g, '/')
     const parts = normalizedName.split('/')
 
-    if (parts.length === 1) {
+    // 检测是否是 URL（URL 不应该被解析为文件夹层级）
+    const isUrl = file.filename.startsWith('http://') || file.filename.startsWith('https://')
+
+    if (isUrl || parts.length === 1) {
       // Root item
       // Check if it's an explicit folder that should merge with an existing implicit one?
       if (item.is_folder) {
@@ -1108,12 +1144,6 @@ const handleBatchIndex = async () => {
     return
   }
 
-  if (isLightRAG.value) {
-    await store.indexFiles(validKeys)
-    selectedRowKeys.value = []
-    return
-  }
-
   currentIndexFileIds.value = [...validKeys]
   isBatchIndexOperation.value = true
   indexConfigModalTitle.value = '批量入库参数配置'
@@ -1197,11 +1227,11 @@ const handleReprocessMemeriesFile = async (record) => {
 
 const handleIndexFile = async (record) => {
   closePopover(record.file_id)
-  if (isLightRAG.value) {
+ if (isLightRAG.value) {
     await store.indexFiles([record.file_id])
     return
   }
-
+  
   // 打开参数配置弹窗
   currentIndexFileIds.value = [record.file_id]
   isBatchIndexOperation.value = false
@@ -1214,7 +1244,8 @@ const handleIndexFile = async (record) => {
     Object.assign(indexParams.value, {
       chunk_size: 1000,
       chunk_overlap: 200,
-      qa_separator: ''
+      qa_separator: '',
+      chunk_preset_id: ''
     })
   }
 
@@ -1239,7 +1270,7 @@ const handleReindexFile = async (record) => {
 const handleIndexConfigConfirm = async () => {
   try {
     // 调用 indexFiles 接口 (支持 params)
-    const result = await store.indexFiles(currentIndexFileIds.value, indexParams.value)
+    const result = await store.indexFiles(currentIndexFileIds.value, buildIndexParamsPayload())
     if (result) {
       currentIndexFileIds.value = []
       // 清空选择
@@ -1253,7 +1284,8 @@ const handleIndexConfigConfirm = async () => {
       Object.assign(indexParams.value, {
         chunk_size: 1000,
         chunk_overlap: 200,
-        qa_separator: ''
+        qa_separator: '',
+        chunk_preset_id: ''
       })
     } else {
       // message.error(`入库失败: ${result.message}`); // store already shows message
@@ -1274,7 +1306,8 @@ const handleIndexConfigCancel = () => {
   Object.assign(indexParams.value, {
     chunk_size: 1000,
     chunk_overlap: 200,
-    qa_separator: ''
+    qa_separator: '',
+    chunk_preset_id: ''
   })
 }
 

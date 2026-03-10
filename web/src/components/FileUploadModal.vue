@@ -12,7 +12,11 @@
             type="primary"
             @click="chunkData"
             :loading="chunkLoading"
-            :disabled="fileList.length === 0"
+            :disabled="
+              uploadMode === 'url'
+                ? !urlList.some((i) => i.status === 'success')
+                : fileList.length === 0
+            "
           >
             添加到知识库
           </a-button>
@@ -30,10 +34,16 @@
             class="custom-segmented"
           />
         </div>
+        <div class="auto-index-toggle">
+          <a-checkbox v-model:checked="autoIndex">上传后自动入库</a-checkbox>
+        </div>
       </div>
 
       <!-- 2. 配置面板 -->
-      <div class="settings-panel">
+      <div
+        class="settings-panel"
+        v-if="folderTreeData.length > 0 || uploadMode !== 'url' || autoIndex"
+      >
         <!-- 第一行：存储位置 + OCR 引擎 -->
         <div :class="['setting-row', { 'two-cols': !isMemeries }]">
           <div class="col-item">
@@ -92,19 +102,21 @@
         <!-- 第三行：自动入库配置 -->
         <div class="setting-row" v-if="!isMemeries">
           <div class="col-item">
-            <div class="setting-label">
-              <a-checkbox v-model:checked="autoIndex">上传后自动入库</a-checkbox>
-            </div>
-            <div class="setting-content" v-if="autoIndex">
-              <template v-if="!isGraphBased">
-                <ChunkParamsConfig :temp-chunk-params="indexParams" :show-qa-split="true" />
-              </template>
-              <template v-else>
-                <div class="lightrag-tip">
-                  <Info :size="14" style="margin-right: 6px" />
-                  <span>LightRAG 将使用默认参数自动入库</span>
-                </div>
-              </template>
+            <div class="setting-label">入库参数配置</div>
+            <div class="setting-content">
+              <ChunkParamsConfig
+                :temp-chunk-params="indexParams"
+                :show-qa-split="true"
+                :show-chunk-size-overlap="!isGraphBased"
+                :show-preset="true"
+                :allow-preset-follow-default="true"
+                :database-preset-id="
+                  store.database?.additional_params?.chunk_preset_id || 'general'
+                "
+              />
+              <p v-if="isGraphBased" class="param-description">
+                LightRAG 按分隔符预切分，超长片段仍会按 token 大小继续切分。
+              </p>
             </div>
           </div>
         </div>
@@ -117,7 +129,7 @@
       </div>
 
       <!-- 文件上传区域 -->
-      <div class="upload-area">
+      <div class="upload-area" v-if="uploadMode !== 'url'">
         <a-upload-dragger
           class="custom-dragger"
           v-model:fileList="fileList"
@@ -137,6 +149,59 @@
           <p class="ant-upload-hint">支持类型: {{ uploadHint }}</p>
           <div class="zip-tip" v-if="hasZipFiles">📦 ZIP包将自动解压提取 Markdown 与图片</div>
         </a-upload-dragger>
+      </div>
+
+      <!-- URL 输入区域 -->
+      <div class="url-area" v-if="uploadMode === 'url'">
+        <div class="url-input-wrapper">
+          <a-textarea
+            v-model:value="newUrl"
+            placeholder="输入 URL，一行一个&#10;https://site1.com&#10;https://site2.com"
+            :auto-size="{ minRows: 4, maxRows: 8 }"
+            class="url-input"
+            @keydown.enter.ctrl="handleFetchUrls"
+          />
+          <div class="url-actions">
+            <span class="url-hint">
+              支持批量粘贴，自动过滤空行。
+              <span class="warning-text">需配置白名单，详见文档说明</span>
+            </span>
+            <a-button
+              type="primary"
+              @click="handleFetchUrls"
+              class="add-url-btn"
+              :loading="fetchingUrls"
+              :disabled="!newUrl.trim()"
+            >
+              加载 URLs
+            </a-button>
+          </div>
+        </div>
+        <div class="url-list" v-if="urlList.length > 0">
+          <div v-for="(item, index) in urlList" :key="index" class="url-item">
+            <div class="url-icon-wrapper">
+              <Link v-if="item.status === 'success'" :size="14" class="url-icon success" />
+              <Info
+                v-else-if="item.status === 'error'"
+                :size="14"
+                class="url-icon error"
+                :title="item.error"
+              />
+              <RotateCw v-else :size="14" class="url-icon spinning" />
+            </div>
+            <div class="url-content">
+              <span class="url-text" :title="item.url">{{ item.url }}</span>
+              <span v-if="item.status === 'error'" class="url-error-msg">{{ item.error }}</span>
+            </div>
+            <a-button type="text" size="small" class="remove-url-btn" @click="removeUrl(index)">
+              <X :size="14" />
+            </a-button>
+          </div>
+        </div>
+        <div class="url-empty-tip" v-else>
+          <Info :size="16" />
+          <span>输入 URL 后点击加载，系统将自动抓取网页内容</span>
+        </div>
       </div>
 
       <!-- 同名文件提示 -->
@@ -185,7 +250,17 @@ import { useDatabaseStore } from '@/stores/database'
 import { ocrApi } from '@/apis/system_api'
 import { fileApi, documentApi } from '@/apis/knowledge_api'
 import { CheckCircleFilled, ReloadOutlined } from '@ant-design/icons-vue'
-import { FileUp, FolderUp, RotateCw, CircleHelp, Info, Download, Trash2 } from 'lucide-vue-next'
+import {
+  FileUp,
+  FolderUp,
+  RotateCw,
+  CircleHelp,
+  Info,
+  Download,
+  Trash2,
+  Link,
+  X
+} from 'lucide-vue-next'
 import { h } from 'vue'
 import ChunkParamsConfig from '@/components/ChunkParamsConfig.vue'
 
@@ -205,6 +280,10 @@ const props = defineProps({
   isFolderMode: {
     type: Boolean,
     default: false
+  },
+  mode: {
+    type: String,
+    default: 'file'
   }
 })
 
@@ -360,23 +439,125 @@ const uploadModeOptions = computed(() => [
       h(FolderUp, { size: 16, class: 'option-icon' }),
       h('span', { class: 'option-text' }, '上传文件夹')
     ])
+  },
+  {
+    value: 'url',
+    label: h('div', { class: 'segmented-option' }, [
+      h(Link, { size: 16, class: 'option-icon' }),
+      h('span', { class: 'option-text' }, '解析 URL')
+    ])
   }
 ])
 
 watch(uploadMode, (val) => {
   isFolderUpload.value = val === 'folder'
-  // 切换模式时清空已选文件，避免混淆
+  // 切换模式时清空已选内容，避免混淆
   fileList.value = []
   sameNameFiles.value = []
+  urlList.value = []
+  newUrl.value = ''
 })
 
 // 文件列表
 const fileList = ref([])
 
+// URL 列表
+// Item structure: { url: string, status: 'fetching'|'success'|'error', data: object|null, error: string }
+const urlList = ref([])
+const newUrl = ref('')
+const fetchingUrls = ref(false)
+
 // 同名文件列表（用于显示提示）
 const sameNameFiles = ref([])
 
-// URL相关功能已移除
+// URL 相关功能
+const isValidUrl = (string) => {
+  try {
+    const url = new URL(string)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch (_) {
+    return false
+  }
+}
+
+const handleFetchUrls = async () => {
+  const text = newUrl.value
+  if (!text) return
+
+  const lines = text
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter((l) => l)
+  if (lines.length === 0) return
+
+  // 1. 预处理：添加到列表
+  const newItems = []
+  for (const url of lines) {
+    if (!isValidUrl(url)) {
+      continue
+    }
+    if (urlList.value.some((u) => u.url === url)) continue
+
+    const item = { url, status: 'pending', data: null, error: '' }
+    urlList.value.push(item)
+    newItems.push(item)
+  }
+
+  if (newItems.length === 0) {
+    if (lines.length > 0) {
+      message.warning('没有检测到有效的新 URL')
+    }
+    return
+  }
+
+  newUrl.value = '' // 清空输入框
+  fetchingUrls.value = true
+
+  // 2. 并发处理
+  // 为避免过多并发请求，可以考虑使用 p-limit 或简单的分批，但此处直接并发
+  const processItem = async (item) => {
+    item.status = 'fetching'
+    try {
+      const res = await fileApi.fetchUrl(item.url, databaseId.value)
+      item.status = 'success'
+      item.data = res
+
+      // 处理同名文件冲突提示
+      if (res.has_same_name && res.same_name_files && res.same_name_files.length > 0) {
+        // 合并到现有的同名文件列表中，去重
+        const existingIds = new Set(sameNameFiles.value.map((f) => f.file_id))
+        const newConflicts = res.same_name_files.filter((f) => !existingIds.has(f.file_id))
+        sameNameFiles.value.push(...newConflicts)
+      }
+    } catch (error) {
+      console.error('Failed to fetch URL:', error)
+      item.status = 'error'
+
+      // 特别处理内容重复 (409)
+      const detail = error.response?.data?.detail || error.message || ''
+      if (detail.includes('same content') || detail.includes('相同内容')) {
+        item.error = '内容已存在于知识库中'
+      } else {
+        item.error = detail || '加载失败'
+      }
+    }
+  }
+
+  await Promise.all(newItems.map(processItem))
+  fetchingUrls.value = false
+}
+
+const removeUrl = (index) => {
+  urlList.value.splice(index, 1)
+}
+
+const handleUrlKeydown = (e) => {
+  // Ctrl + Enter 提交
+  if (e.key === 'Enter' && e.ctrlKey) {
+    e.preventDefault()
+    handleFetchUrls()
+  }
+}
 
 // OCR服务健康状态
 const ocrHealthStatus = ref({
@@ -400,8 +581,25 @@ const autoIndex = ref(false)
 const indexParams = ref({
   chunk_size: 1000,
   chunk_overlap: 200,
-  qa_separator: ''
+  qa_separator: '',
+  chunk_preset_id: ''
 })
+
+const buildAutoIndexParams = () => {
+  const payload = {}
+  if (indexParams.value.chunk_preset_id) {
+    payload.chunk_preset_id = indexParams.value.chunk_preset_id
+  }
+
+  if (isGraphBased.value) {
+    payload.qa_separator = indexParams.value.qa_separator || ''
+    return payload
+  }
+  return {
+    ...indexParams.value,
+    ...payload
+  }
+}
 
 // 计算属性：是否支持QA分割
 const isQaSplitSupported = computed(() => {
@@ -808,11 +1006,68 @@ const chunkData = async () => {
     return
   }
 
-  // 验证OCR服务可用性
-  if (!validateOcrService()) {
+  // 验证OCR服务可用性（非 URL 模式下）
+  if (uploadMode.value !== 'url' && !validateOcrService()) {
     return
   }
 
+  // URL 模式处理
+  if (uploadMode.value === 'url') {
+    // 过滤出成功的项
+    const successfulItems = urlList.value.filter((item) => item.status === 'success' && item.data)
+    if (successfulItems.length === 0) {
+      message.error('请添加并等待至少一个 URL 解析成功')
+      return
+    }
+
+    try {
+      store.state.chunkLoading = true
+      const params = { ...chunkParams.value }
+      if (autoIndex.value) {
+        params.auto_index = true
+        Object.assign(params, buildAutoIndexParams())
+      }
+
+      // 构造 _preprocessed_map 和 items (minio urls)
+      const items = []
+      const preprocessedMap = {}
+      for (const item of successfulItems) {
+        // item.data = { file_path: "http://minio...", content_hash: "...", filename: "...", ... }
+        // 注意：fetch-url 返回的 file_path 其实是 MinIO URL
+        // 我们需要传递 MinIO URL 给 addDocuments
+        const minioUrl = item.data.file_path
+        items.push(minioUrl)
+        preprocessedMap[minioUrl] = {
+          path: minioUrl,
+          content_hash: item.data.content_hash,
+          filename: item.data.filename,
+          file_size: item.data.size
+        }
+      }
+      params._preprocessed_map = preprocessedMap
+
+      // 调用 addFiles (file mode)
+      await store.addFiles({
+        items: items,
+        contentType: 'file', // 重要：这里改为 file，因为我们已经转成了 minio 上的文件
+        params,
+        parentId: selectedFolderId.value
+      })
+
+      emit('success')
+      handleCancel()
+      urlList.value = []
+      newUrl.value = ''
+    } catch (error) {
+      console.error('URL 提交失败:', error)
+      message.error('URL 提交失败: ' + (error.message || '未知错误'))
+    } finally {
+      store.state.chunkLoading = false
+    }
+    return
+  }
+
+  // 文件模式处理
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']
 
   // 提取已上传的文件信息
@@ -848,7 +1103,7 @@ const chunkData = async () => {
     const params = { ...chunkParams.value, content_hashes }
     if (autoIndex.value) {
       params.auto_index = true
-      Object.assign(params, indexParams.value)
+      Object.assign(params, buildAutoIndexParams())
     }
 
     await store.addFiles({
@@ -898,12 +1153,25 @@ const chunkData = async () => {
   align-items: center;
 }
 
+.auto-index-toggle {
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+
+  :deep(.ant-checkbox-wrapper) {
+    font-size: 13px;
+    color: var(--gray-600);
+    font-weight: 500;
+  }
+}
+
 .help-link-btn {
   color: var(--gray-600);
   font-size: 13px;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
 
   &:hover {
     color: var(--main-color);
@@ -1145,6 +1413,135 @@ const chunkData = async () => {
   border-radius: 4px;
 }
 
+/* URL Area */
+.url-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.url-input-wrapper {
+  width: 100%;
+}
+
+.url-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.url-hint {
+  font-size: 12px;
+  color: var(--gray-500);
+
+  .warning-text {
+    color: var(--color-warning-500);
+    margin-left: 4px;
+  }
+}
+
+.url-input {
+  width: 100%;
+  padding: 10px;
+}
+
+.add-url-btn {
+  margin-left: 8px;
+}
+
+.url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.url-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--gray-100);
+    border-color: var(--main-300);
+  }
+}
+
+.url-icon-wrapper {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.url-icon {
+  color: var(--main-500);
+
+  &.success {
+    color: var(--color-success-500);
+  }
+
+  &.error {
+    color: var(--color-error-500);
+    cursor: help;
+  }
+
+  &.spinning {
+    animation: spin 1s linear infinite;
+    color: var(--main-500);
+  }
+}
+
+.url-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.url-text {
+  font-size: 13px;
+  color: var(--gray-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url-error-msg {
+  font-size: 11px;
+  color: var(--color-error-500);
+  margin-top: 2px;
+}
+
+.remove-url-btn {
+  color: var(--gray-400);
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--color-error-500);
+  }
+}
+
+.url-empty-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: var(--gray-50);
+  border: 1px dashed var(--gray-300);
+  border-radius: 8px;
+  color: var(--gray-500);
+  font-size: 13px;
+}
+
 /* Conflict Files Panel */
 .conflict-files-panel {
   border: 1px solid var(--gray-200);
@@ -1240,17 +1637,6 @@ const chunkData = async () => {
   background: var(--gray-0);
   border: 1px solid var(--gray-200);
   border-radius: 6px;
-}
-
-.lightrag-tip {
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: var(--main-50);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--gray-600);
 }
 
 .setting-label .ant-checkbox {

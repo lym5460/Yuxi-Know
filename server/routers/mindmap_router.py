@@ -7,7 +7,6 @@
 - 保存和加载思维导图配置
 """
 
-import asyncio
 import json
 import traceback
 import textwrap
@@ -214,10 +213,10 @@ async def generate_mindmap(
         # 调用AI生成
         logger.info(f"开始生成思维导图，知识库: {db_name}, 文件数量: {len(files_info)}")
 
-        # 选择模型并调用（使用异步包装）
+        # 选择模型并调用
         model = select_model()
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}]
-        response = await asyncio.to_thread(model.call, messages, stream=False)
+        response = await model.call(messages, stream=False)
 
         # 解析AI返回的JSON
         try:
@@ -287,8 +286,7 @@ async def get_databases_overview(current_user: User = Depends(get_admin_user)):
         知识库列表
     """
     try:
-        user_info = {"role": current_user.role, "department_id": current_user.department_id}
-        databases = await knowledge_base.get_databases_by_user(user_info)
+        databases = await knowledge_base.get_databases_by_user_id(current_user.user_id)
 
         # databases["databases"] 是一个列表，每个元素已经包含了基本信息
         db_list_raw = databases.get("databases", [])
