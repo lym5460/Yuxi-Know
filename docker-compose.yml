@@ -347,8 +347,6 @@ services:
     networks:
       - app-network
     restart: unless-stopped
-    networks:
-      - app-network
 
   paddlex:
     build:
