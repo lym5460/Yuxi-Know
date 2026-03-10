@@ -1814,6 +1814,7 @@ const loadVoiceMessages = async (threadId) => {
 
 // 先初始化音频播放器
 const {
+  isPlaying: isVoicePlaying,
   playAudioChunk,
   flush: flushVoiceAudio,
   stop: stopVoiceAudio,
@@ -1915,6 +1916,11 @@ function handleVoiceMessage(msg) {
       }
       break
     case 'transcription':
+      // 语音打断：收到转写文本且音频仍在播放，说明用户确实在说话，立即打断
+      if (msg.text && isVoicePlaying.value) {
+        handleSmartInterrupt()
+        resetVoiceAudio()
+      }
       if (msg.is_final) {
         // 最终结果
         if (msg.text) {

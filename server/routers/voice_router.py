@@ -307,6 +307,7 @@ async def voice_websocket(
     current_asr_text: str = ""  # 累积 ASR 识别文本用于 RAG 检索
     rag_sent: bool = False  # 当前轮次是否已发送 RAG
     current_tts_type: str = ""  # 当前 TTS 类型，用于过滤闲聊回复
+    rag_chat_enabled: bool = True  # CHAT_RESPONSE 文本是否允许发送（RAG 模式下 default 阶段禁用）
 
     await send_status(websocket, VoiceStatus.IDLE)
 
@@ -323,7 +324,7 @@ async def voice_websocket(
 
     async def handle_doubao_events():
         """处理豆包服务端事件"""
-        nonlocal current_question_id, is_listening, current_asr_text, rag_sent, current_tts_type
+        nonlocal current_question_id, is_listening, current_asr_text, rag_sent, current_tts_type, rag_chat_enabled
 
         while doubao_client.is_connected:
             result = await doubao_client.receive()
@@ -340,6 +341,7 @@ async def voice_websocket(
                     current_asr_text = ""  # 重置 ASR 文本
                     rag_sent = False  # 重置 RAG 发送状态
                     current_tts_type = ""  # 重置 TTS 类型
+                    rag_chat_enabled = True  # 重置文本发送开关
                     if interrupt_enabled:
                         await send_status(websocket, VoiceStatus.LISTENING)
 
@@ -372,6 +374,9 @@ async def voice_websocket(
                     elif knowledges and current_asr_text:
                         # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
                         rag_sent = await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
+                        if rag_sent:
+                            # RAG 已发送，暂停 CHAT_RESPONSE 文本（default 阶段的文本不显示）
+                            rag_chat_enabled = False
 
                 case EventID.TTS_SENTENCE_START:
                     # TTS 开始合成
@@ -386,8 +391,8 @@ async def voice_websocket(
                         continue
 
                     logger.info(f"TTS 开始: tts_type={tts_type}, text={text[:50] if text else ''}")
-                    if text:
-                        await send_response_chunk(websocket, text)
+                    # 非 default TTS 开始，允许发送 CHAT_RESPONSE 文本
+                    rag_chat_enabled = True
                     await send_status(websocket, VoiceStatus.SPEAKING)
 
                 case EventID.TTS_RESPONSE:
@@ -403,9 +408,10 @@ async def voice_websocket(
 
                 case EventID.TTS_ENDED:
                     # TTS 结束
-                    # 如果当前是闲聊回复且已发送 RAG，忽略结束事件
+                    # 如果当前是闲聊回复且已发送 RAG，忽略结束事件，并启用后续 CHAT_RESPONSE
                     if knowledges and rag_sent and current_tts_type == "default":
-                        logger.debug("忽略闲聊回复的 TTS_ENDED 事件")
+                        rag_chat_enabled = True
+                        logger.debug("闲聊回复 TTS 结束，启用 RAG 文本输出")
                         continue
 
                     await send_message(websocket, ServerMessage(type=ServerMessageType.AUDIO_END))
@@ -414,13 +420,12 @@ async def voice_websocket(
 
                 case EventID.CHAT_RESPONSE:
                     # 模型回复文本
-                    # 如果当前是闲聊回复且已发送 RAG，忽略
-                    if knowledges and rag_sent and current_tts_type == "default":
-                        continue
-
                     content = payload.get("content", "")
-                    if content:
-                        await send_response_chunk(websocket, content)
+                    if not content:
+                        continue
+                    if not rag_chat_enabled:
+                        continue
+                    await send_response_chunk(websocket, content)
 
                 case EventID.SESSION_FAILED | EventID.DIALOG_COMMON_ERROR:
                     # 错误
