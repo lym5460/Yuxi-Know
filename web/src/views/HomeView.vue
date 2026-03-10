@@ -90,7 +90,6 @@
           <p class="copyright">{{ infoStore.footer?.copyright || '© 2025 All rights reserved' }}</p>
         </div>
       </footer>
-    </template>
   </div>
 </template>
 
