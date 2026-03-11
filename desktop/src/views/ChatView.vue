@@ -23,6 +23,13 @@
         >
           <MessageSquare :size="14" />
           <span class="thread-title">{{ thread.title || '新的对话' }}</span>
+          <button
+            class="thread-delete-btn"
+            @click.stop="deleteThread(thread.id)"
+            title="删除对话"
+          >
+            <Trash2 :size="13" />
+          </button>
         </div>
         <div v-if="!chatStore.threads.length" class="thread-empty">
           暂无对话
@@ -81,15 +88,25 @@
           {{ voiceInterimTranscript }}
         </div>
         <div class="voice-controls">
+          <button class="voice-mode-btn" @click="toggleVoiceMode" :title="voiceMode === 'pushToTalk' ? '切换为持续对话' : '切换为按住说话'">
+            <Hand v-if="voiceMode === 'pushToTalk'" :size="16" />
+            <MousePointerClick v-else :size="16" />
+            <span>{{ voiceMode === 'pushToTalk' ? '按住说话' : '持续对话' }}</span>
+          </button>
           <span class="voice-status-text">{{ voiceStatusText }}</span>
           <button
             class="voice-btn"
-            :class="{ recording: voiceRecording, error: voiceStatus === 'error' }"
-            @click="toggleVoiceRecording"
+            :class="{
+              recording: voiceMode === 'continuous' ? voiceRecording : spaceHeld,
+              connected: voiceMode === 'pushToTalk' && voiceRecording && !spaceHeld,
+              error: voiceStatus === 'error'
+            }"
+            @click="voiceMode === 'continuous' ? toggleVoiceRecording() : (voiceRecording ? stopVoiceRecording() : null)"
           >
-            <div v-if="voiceRecording" class="voice-level" :style="{ transform: `scale(${1 + voiceAudioLevel * 0.8})` }"></div>
-            <Mic v-if="!voiceRecording" :size="24" />
-            <PhoneOff v-else :size="24" />
+            <div v-if="voiceMode === 'continuous' ? voiceRecording : spaceHeld" class="voice-level" :style="{ transform: `scale(${1 + voiceAudioLevel * 0.8})` }"></div>
+            <PhoneOff v-if="voiceMode === 'continuous' && voiceRecording" :size="24" />
+            <PhoneOff v-else-if="voiceMode === 'pushToTalk' && voiceRecording" :size="20" />
+            <Mic v-else :size="24" />
           </button>
         </div>
       </div>
@@ -145,22 +162,27 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   Bot, ChevronDown, Plus, MessageSquare, Settings, LogOut,
-  SendHorizontal, LoaderCircle, Mic, MicOff, PhoneOff
+  SendHorizontal, LoaderCircle, Mic, MicOff, PhoneOff, Trash2,
+  Hand, MousePointerClick
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
-import { agentApi } from '@/apis'
+import { agentApi, threadApi } from '@/apis'
 import { createVoiceWebSocket, sendAudio, sendControl, saveVoiceMessage } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
+import { useVideoWindow } from '@/composables/useTauriIntegration'
+import { useServerStore } from '@/stores/server'
 import ChatMessage from '@/components/ChatMessage.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
 const chatStore = useChatStore()
 const userStore = useUserStore()
+const serverStore = useServerStore()
+const { openVideoWindow, closeVideoWindow, sendMediaCommand } = useVideoWindow()
 
 const userInput = ref('')
 const showAgentModal = ref(false)
@@ -184,9 +206,13 @@ const voiceAudioLevel = ref(0)
 let voiceWs = null
 const currentStreamingMsgIndex = ref(-1)
 
+const voiceMode = ref('continuous') // 'pushToTalk' | 'continuous'
+
 const voiceStatusText = computed(() => {
+  if (voiceStatus.value === 'idle') {
+    return voiceMode.value === 'pushToTalk' ? '按住空格说话' : '点击麦克风开始对话'
+  }
   const texts = {
-    idle: '点击麦克风开始对话',
     connecting: '连接中...',
     listening: '正在听您说...',
     processing: '思考中...',
@@ -195,6 +221,11 @@ const voiceStatusText = computed(() => {
   }
   return texts[voiceStatus.value] || ''
 })
+
+function toggleVoiceMode() {
+  if (voiceRecording.value) stopVoiceRecording()
+  voiceMode.value = voiceMode.value === 'pushToTalk' ? 'continuous' : 'pushToTalk'
+}
 
 const {
   isPlaying: isVoicePlaying,
@@ -205,7 +236,8 @@ const {
 
 const {
   startCapture,
-  stopCapture
+  stopCapture,
+  error: captureError
 } = useAudioCapture({
   onAudioChunk: (chunk) => {
     if (voiceWs) sendAudio(voiceWs, chunk)
@@ -222,8 +254,11 @@ function handleVoiceMessage(msg) {
       if (!voiceRecording.value && msg.status === 'listening') break
       voiceStatus.value = msg.status
       if (msg.status === 'idle' && voiceRecording.value) {
-        sendControl(voiceWs, 'start')
-        voiceStatus.value = 'listening'
+        if (voiceMode.value === 'continuous') {
+          sendControl(voiceWs, 'start')
+          voiceStatus.value = 'listening'
+        }
+        // pushToTalk 模式下不自动重启监听，等待用户按空格
       }
       if (msg.status === 'listening' && currentStreamingMsgIndex.value === -2) {
         currentStreamingMsgIndex.value = -1
@@ -240,6 +275,13 @@ function handleVoiceMessage(msg) {
       }
       if (msg.is_final) {
         if (msg.text) {
+          // 如果是第一条消息，用内容自动更新对话标题
+          if (chatStore.messages.length === 0) {
+            const autoTitle = msg.text.slice(0, 30)
+            threadApi.updateThread(chatStore.currentThreadId, autoTitle)
+              .then(() => chatStore.loadThreads(agentStore.selectedAgentId))
+              .catch(() => {})
+          }
           chatStore.addMessage({ role: 'user', content: msg.text })
           saveVoiceMessage(chatStore.currentThreadId, { role: 'user', content: msg.text }).catch(() => {})
           scrollToBottom()
@@ -280,6 +322,28 @@ function handleVoiceMessage(msg) {
       break
     case 'audio_end':
       break
+    case 'media_command': {
+      const data = msg.data
+      if (!data) break
+      if (data.action === 'stop') {
+        closeVideoWindow()
+        break
+      }
+      if (!data.media_url || !data.media_type) break
+      const mediaUrl = data.media_url.startsWith('/') ? serverStore.resolveUrl(data.media_url) : data.media_url
+      openVideoWindow().then(() => {
+        setTimeout(() => {
+          sendMediaCommand({
+            action: 'play',
+            media_url: mediaUrl,
+            media_type: data.media_type,
+            start_time: data.start_time || 0,
+            media_name: data.description || ''
+          })
+        }, 500)
+      })
+      break
+    }
     case 'error':
       console.error('Voice error:', msg.error)
       voiceStatus.value = 'error'
@@ -315,10 +379,17 @@ async function startVoiceRecording() {
 
   connectVoiceWebSocket()
 
-  const checkAndStart = () => {
+  const checkAndStart = async () => {
     if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
       sendControl(voiceWs, 'start')
-      startCapture()
+      await startCapture()
+      if (captureError.value) {
+        console.error('麦克风获取失败:', captureError.value)
+        voiceStatus.value = 'error'
+        voiceWs.close()
+        voiceWs = null
+        return
+      }
       voiceRecording.value = true
     } else if (voiceWs) {
       setTimeout(checkAndStart, 100)
@@ -335,6 +406,8 @@ function stopVoiceRecording() {
   voiceRecording.value = false
   voiceInterimTranscript.value = ''
   if (voiceWs) {
+    voiceWs.onclose = null
+    voiceWs.onerror = null
     voiceWs.close()
     voiceWs = null
   }
@@ -349,14 +422,51 @@ function toggleVoiceRecording() {
   }
 }
 
+// 全局按住空格说话（仅控制音频捕获，不影响 WebSocket 连接）
+const spaceHeld = ref(false)
+
+function handleKeyDown(e) {
+  if (e.code !== 'Space' || e.repeat) return
+  const tag = document.activeElement?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return
+  if (voiceMode.value !== 'pushToTalk') return
+  if (!isVoiceAgent.value || chatStore.isProcessing) return
+  e.preventDefault()
+  spaceHeld.value = true
+  if (!voiceRecording.value) {
+    startVoiceRecording()
+  } else {
+    // 恢复音频捕获并通知后端重新开始监听
+    if (voiceWs) sendControl(voiceWs, 'start')
+    startCapture()
+  }
+}
+
+function handleKeyUp(e) {
+  if (e.code !== 'Space' || !spaceHeld.value) return
+  e.preventDefault()
+  spaceHeld.value = false
+  if (voiceRecording.value) {
+    stopCapture()
+    if (voiceWs) sendControl(voiceWs, 'stop')
+  }
+}
+
 // 初始化
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeyDown)
+  document.addEventListener('keyup', handleKeyUp)
   if (!agentStore.isInitialized) {
     await agentStore.initialize()
   }
   if (agentStore.selectedAgentId) {
     await chatStore.loadThreads(agentStore.selectedAgentId)
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown)
+  document.removeEventListener('keyup', handleKeyUp)
 })
 
 // 切换智能体时重新加载会话列表
@@ -409,6 +519,20 @@ function switchThread(threadId) {
   chatStore.selectThread(threadId)
 }
 
+async function deleteThread(threadId) {
+  if (!threadId) return
+  try {
+    await threadApi.deleteThread(threadId)
+    if (chatStore.currentThreadId === threadId) {
+      chatStore.selectThread(null)
+      chatStore.messages = []
+    }
+    await chatStore.loadThreads(agentStore.selectedAgentId)
+  } catch (e) {
+    console.error('删除对话失败:', e)
+  }
+}
+
 async function sendMessage(text) {
   const content = text || userInput.value.trim()
   if (!content || chatStore.isProcessing) return
@@ -427,6 +551,14 @@ async function sendMessage(text) {
     const result = await chatStore.createThread(agentId)
     threadId = result?.id
     if (!threadId) return
+  }
+
+  // 如果是第一条消息，用内容自动更新对话标题
+  if (chatStore.messages.length === 0) {
+    const autoTitle = content.replace(/\s+/g, ' ').trim().slice(0, 30)
+    if (autoTitle) {
+      threadApi.updateThread(threadId, autoTitle).catch(() => {})
+    }
   }
 
   // 添加用户消息
@@ -618,6 +750,30 @@ onUnmounted(() => {
     font-weight: 500;
   }
 
+  .thread-delete-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--gray-400);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: color 0.15s;
+
+    &:hover {
+      color: #ef4444;
+    }
+  }
+
+  &:hover .thread-delete-btn {
+    display: flex;
+  }
+
   .thread-title {
     flex: 1;
     overflow: hidden;
@@ -802,6 +958,26 @@ onUnmounted(() => {
   gap: 16px;
 }
 
+.voice-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gray-200);
+  background: var(--gray-50);
+  color: var(--gray-600);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: var(--color-primary-500);
+    color: var(--color-primary-500);
+  }
+}
+
 .voice-status-text {
   font-size: 13px;
   color: var(--gray-500);
@@ -827,6 +1003,11 @@ onUnmounted(() => {
 
   &.recording {
     background: #ef4444;
+  }
+
+  &.connected {
+    background: var(--color-primary-100);
+    color: var(--color-primary-600);
   }
 
   &.error {

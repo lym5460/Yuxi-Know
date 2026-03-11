@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './base'
+import { apiGet, apiPost, apiDelete } from './base'
 import { useUserStore } from '@/stores/user'
 import { useServerStore } from '@/stores/server'
 
@@ -66,5 +66,5 @@ export const threadApi = {
     apiPost(`/api/chat/thread/${threadId}`, { title }),
 
   deleteThread: (threadId) =>
-    apiPost(`/api/chat/thread/${threadId}/delete`, {})
+    apiDelete(`/api/chat/thread/${threadId}`)
 }

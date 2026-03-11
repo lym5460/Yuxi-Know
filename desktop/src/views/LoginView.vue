@@ -1,7 +1,7 @@
 <template>
   <div class="login-view">
     <div class="login-card">
-      <h2 class="login-title">登录语析</h2>
+      <h2 class="login-title">登录KGRAG-曼析</h2>
       <p class="login-server">
         <Globe :size="14" />
         <span>{{ serverStore.serverUrl }}</span>

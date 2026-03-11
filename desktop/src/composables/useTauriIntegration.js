@@ -83,17 +83,28 @@ export function useVideoWindow() {
     }
   }
 
-  async function sendMediaCommand(payload) {
+  async function closeVideoWindow() {
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
       const videoWin = await WebviewWindow.getByLabel('video')
-      if (videoWin) {
-        await videoWin.emit('media-command', payload)
-      }
+      if (videoWin) await videoWin.close()
     } catch (e) {
+      console.error('关闭视频窗口失败:', e)
+    }
+  }
+
+  async function sendMediaCommand(payload, retries = 5) {
+    try {
+      const { emitTo } = await import('@tauri-apps/api/event')
+      await emitTo('video', 'media-command', payload)
+    } catch (e) {
+      if (retries > 0) {
+        await new Promise((r) => setTimeout(r, 500))
+        return sendMediaCommand(payload, retries - 1)
+      }
       console.error('发送媒体命令失败:', e)
     }
   }
 
-  return { openVideoWindow, sendMediaCommand }
+  return { openVideoWindow, closeVideoWindow, sendMediaCommand }
 }

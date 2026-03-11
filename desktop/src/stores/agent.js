@@ -27,9 +27,12 @@ export const useAgentStore = defineStore('agent', () => {
       if (defaultResult?.agent_id) {
         defaultAgentId.value = defaultResult.agent_id
       }
-      // 如果没有选中的智能体，选择默认的或第一个
+      // 如果没有选中的智能体，优先选择语音助手，其次默认智能体，最后第一个
       if (!selectedAgentId.value && agents.value.length > 0) {
-        selectedAgentId.value = defaultAgentId.value || agents.value[0].id
+        const voiceAgent = agents.value.find(
+          (a) => a.capabilities && a.capabilities.includes('voice')
+        )
+        selectedAgentId.value = voiceAgent?.id || defaultAgentId.value || agents.value[0].id
       }
       isInitialized.value = true
     } catch (error) {

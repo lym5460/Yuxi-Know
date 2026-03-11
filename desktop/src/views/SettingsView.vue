@@ -2,7 +2,7 @@
   <div class="settings-view">
     <div class="settings-card">
       <h2 class="settings-title">服务器设置</h2>
-      <p class="settings-desc">配置语析服务端地址以连接您的智能体平台</p>
+      <p class="settings-desc">配置KGRAG-曼析服务端地址以连接您的智能体平台</p>
 
       <a-form layout="vertical" :model="form" @finish="handleSave">
         <a-form-item label="服务器地址" name="serverUrl"

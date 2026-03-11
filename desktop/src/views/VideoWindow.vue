@@ -38,16 +38,17 @@ const mediaName = ref('')
 const startTime = ref(0)
 const videoRef = ref(null)
 
-function handleMessage(event) {
-  if (event.data?.type === 'media_command') {
-    const p = event.data.payload
-    mediaUrl.value = p.media_url || ''
-    mediaType.value = p.media_type || 'video'
-    mediaName.value = p.media_name || ''
-    startTime.value = p.start_time || 0
-  } else if (event.data?.type === 'media_stop') {
+let unlisten = null
+
+function handleCommand(payload) {
+  if (payload.action === 'stop') {
     mediaUrl.value = ''
+    return
   }
+  mediaUrl.value = payload.media_url || ''
+  mediaType.value = payload.media_type || 'video'
+  mediaName.value = payload.media_name || ''
+  startTime.value = payload.start_time || 0
 }
 
 function handleLoaded() {
@@ -56,12 +57,22 @@ function handleLoaded() {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('message', handleMessage)
+onMounted(async () => {
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    unlisten = await listen('media-command', (event) => {
+      handleCommand(event.payload)
+    })
+  } catch {
+    // 非 Tauri 环境回退到 postMessage
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'media_command') handleCommand(e.data.payload)
+    })
+  }
 })
 
 onUnmounted(() => {
-  window.removeEventListener('message', handleMessage)
+  if (unlisten) unlisten()
 })
 </script>
 

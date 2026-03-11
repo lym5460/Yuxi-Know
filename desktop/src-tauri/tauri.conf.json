@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "语析",
+  "productName": "KGRAG-曼析",
   "version": "0.5.1",
   "identifier": "com.yuxi-know.desktop",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "语析",
+        "title": "KGRAG-曼析",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -27,11 +27,12 @@
     "trayIcon": {
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true,
-      "tooltip": "语析"
+      "tooltip": "KGRAG-曼析"
     },
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

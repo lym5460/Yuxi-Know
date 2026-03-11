@@ -37,13 +37,10 @@ async fn open_video_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     // 创建新的视频窗口
-    tauri::WebviewWindowBuilder::new(&app, "video", tauri::WebviewUrl::App("/video".into()))
+    tauri::WebviewWindowBuilder::new(&app, "video", tauri::WebviewUrl::App("/#/video".into()))
         .title("视频播放")
-        .inner_size(854.0, 480.0)
-        .min_inner_size(480.0, 270.0)
-        .center()
+        .fullscreen(true)
         .resizable(true)
-        .always_on_top(true)
         .build()
         .map_err(|e| e.to_string())?;
 
