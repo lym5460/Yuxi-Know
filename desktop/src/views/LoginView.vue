@@ -63,7 +63,7 @@ async function handleLogin() {
 
   try {
     await userStore.login({ loginId: form.loginId, password: form.password })
-    router.push('/agent')
+    router.push('/chat')
   } catch (e) {
     if (e.status === 423) {
       errorMsg.value = e.message || '账户已被锁定，请稍后重试'
