@@ -19,13 +19,13 @@ export const useAgentStore = defineStore('agent', () => {
     if (loading.value) return
     loading.value = true
     try {
-      const [agentList, defaultAgent] = await Promise.all([
+      const [agentResult, defaultResult] = await Promise.all([
         agentApi.getAgents(),
         agentApi.getDefaultAgent().catch(() => null)
       ])
-      agents.value = agentList || []
-      if (defaultAgent?.agent_id) {
-        defaultAgentId.value = defaultAgent.agent_id
+      agents.value = agentResult?.agents || []
+      if (defaultResult?.agent_id) {
+        defaultAgentId.value = defaultResult.agent_id
       }
       // 如果没有选中的智能体，选择默认的或第一个
       if (!selectedAgentId.value && agents.value.length > 0) {

@@ -22,8 +22,8 @@ export const useChatStore = defineStore('chat', () => {
   async function createThread(agentId) {
     try {
       const result = await threadApi.createThread(agentId, '新的对话')
-      if (result?.thread_id) {
-        currentThreadId.value = result.thread_id
+      if (result?.id) {
+        currentThreadId.value = result.id
         await loadThreads(agentId)
         messages.value = []
       }
@@ -43,7 +43,15 @@ export const useChatStore = defineStore('chat', () => {
     isLoadingMessages.value = true
     try {
       const result = await agentApi.getAgentHistory(agentId, threadId)
-      messages.value = result || []
+      const history = result?.history || []
+      // 后端用 type: human/ai/tool/system，映射为 role: user/assistant
+      messages.value = history
+        .filter((m) => m.type === 'human' || m.type === 'ai')
+        .map((m) => ({
+          role: m.type === 'human' ? 'user' : 'assistant',
+          content: m.content || '',
+          id: m.id
+        }))
     } catch (e) {
       console.error('加载历史消息失败:', e)
     } finally {

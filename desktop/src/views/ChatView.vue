@@ -16,10 +16,10 @@
       <div class="thread-list">
         <div
           v-for="thread in chatStore.threads"
-          :key="thread.thread_id"
+          :key="thread.id"
           class="thread-item"
-          :class="{ active: thread.thread_id === chatStore.currentThreadId }"
-          @click="switchThread(thread.thread_id)"
+          :class="{ active: thread.id === chatStore.currentThreadId }"
+          @click="switchThread(thread.id)"
         >
           <MessageSquare :size="14" />
           <span class="thread-title">{{ thread.title || '新的对话' }}</span>
@@ -75,8 +75,27 @@
         </template>
       </div>
 
-      <!-- 输入区 -->
-      <div class="input-area">
+      <!-- 语音输入区 -->
+      <div v-if="isVoiceAgent" class="input-area voice-input-area">
+        <div v-if="voiceInterimTranscript" class="voice-interim">
+          {{ voiceInterimTranscript }}
+        </div>
+        <div class="voice-controls">
+          <span class="voice-status-text">{{ voiceStatusText }}</span>
+          <button
+            class="voice-btn"
+            :class="{ recording: voiceRecording, error: voiceStatus === 'error' }"
+            @click="toggleVoiceRecording"
+          >
+            <div v-if="voiceRecording" class="voice-level" :style="{ transform: `scale(${1 + voiceAudioLevel * 0.8})` }"></div>
+            <Mic v-if="!voiceRecording" :size="24" />
+            <PhoneOff v-else :size="24" />
+          </button>
+        </div>
+      </div>
+
+      <!-- 文本输入区 -->
+      <div v-else class="input-area">
         <div class="input-wrapper">
           <textarea
             ref="inputRef"
@@ -123,16 +142,19 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   Bot, ChevronDown, Plus, MessageSquare, Settings, LogOut,
-  SendHorizontal, LoaderCircle
+  SendHorizontal, LoaderCircle, Mic, MicOff, PhoneOff
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
 import { agentApi } from '@/apis'
+import { createVoiceWebSocket, sendAudio, sendControl, saveVoiceMessage } from '@/apis/voice_api'
+import { useAudioCapture } from '@/composables/useAudioCapture'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import ChatMessage from '@/components/ChatMessage.vue'
 
 const router = useRouter()
@@ -149,6 +171,184 @@ const exampleQuestions = computed(() => {
   return agentStore.currentAgent?.examples || []
 })
 
+// 语音模式
+const isVoiceAgent = computed(() => {
+  const caps = agentStore.currentAgent?.capabilities || []
+  return caps.includes('voice')
+})
+
+const voiceStatus = ref('idle')
+const voiceRecording = ref(false)
+const voiceInterimTranscript = ref('')
+const voiceAudioLevel = ref(0)
+let voiceWs = null
+const currentStreamingMsgIndex = ref(-1)
+
+const voiceStatusText = computed(() => {
+  const texts = {
+    idle: '点击麦克风开始对话',
+    connecting: '连接中...',
+    listening: '正在听您说...',
+    processing: '思考中...',
+    speaking: '正在回复...',
+    error: '连接出错'
+  }
+  return texts[voiceStatus.value] || ''
+})
+
+const {
+  isPlaying: isVoicePlaying,
+  playAudioChunk,
+  stop: stopVoiceAudio,
+  reset: resetVoiceAudio
+} = useAudioPlayer()
+
+const {
+  startCapture,
+  stopCapture
+} = useAudioCapture({
+  onAudioChunk: (chunk) => {
+    if (voiceWs) sendAudio(voiceWs, chunk)
+  },
+  onAudioLevel: (level) => {
+    voiceAudioLevel.value = level
+  },
+  vadEnabled: false
+})
+
+function handleVoiceMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      if (!voiceRecording.value && msg.status === 'listening') break
+      voiceStatus.value = msg.status
+      if (msg.status === 'idle' && voiceRecording.value) {
+        sendControl(voiceWs, 'start')
+        voiceStatus.value = 'listening'
+      }
+      if (msg.status === 'listening' && currentStreamingMsgIndex.value === -2) {
+        currentStreamingMsgIndex.value = -1
+      }
+      break
+    case 'transcription':
+      if (msg.text && isVoicePlaying.value) {
+        stopVoiceAudio()
+        resetVoiceAudio()
+        currentStreamingMsgIndex.value = -2
+        if (voiceWs) sendControl(voiceWs, 'interrupt')
+        voiceInterimTranscript.value = ''
+        voiceStatus.value = 'listening'
+      }
+      if (msg.is_final) {
+        if (msg.text) {
+          chatStore.addMessage({ role: 'user', content: msg.text })
+          saveVoiceMessage(chatStore.currentThreadId, { role: 'user', content: msg.text }).catch(() => {})
+          scrollToBottom()
+        }
+        voiceInterimTranscript.value = ''
+        currentStreamingMsgIndex.value = -1
+      } else {
+        voiceInterimTranscript.value = msg.text || ''
+      }
+      break
+    case 'response':
+      if (msg.text && currentStreamingMsgIndex.value !== -2) {
+        if (currentStreamingMsgIndex.value === -1) {
+          chatStore.addMessage({ role: 'assistant', content: msg.text })
+          currentStreamingMsgIndex.value = chatStore.messages.length - 1
+        } else {
+          chatStore.updateLastAssistantMessage(
+            chatStore.messages[currentStreamingMsgIndex.value].content + msg.text
+          )
+        }
+        scrollToBottom()
+      }
+      break
+    case 'response_end':
+      if (currentStreamingMsgIndex.value >= 0) {
+        const completeMsg = chatStore.messages[currentStreamingMsgIndex.value]
+        if (completeMsg) {
+          saveVoiceMessage(chatStore.currentThreadId, completeMsg).catch(() => {})
+        }
+      }
+      currentStreamingMsgIndex.value = -1
+      break
+    case 'audio':
+      if (msg.audio_data && currentStreamingMsgIndex.value !== -2) {
+        playAudioChunk(msg.audio_data)
+        voiceStatus.value = 'speaking'
+      }
+      break
+    case 'audio_end':
+      break
+    case 'error':
+      console.error('Voice error:', msg.error)
+      voiceStatus.value = 'error'
+      currentStreamingMsgIndex.value = -1
+      break
+  }
+}
+
+function connectVoiceWebSocket() {
+  if (voiceWs) return
+  voiceStatus.value = 'connecting'
+  voiceWs = createVoiceWebSocket(agentStore.selectedAgentId, {
+    onMessage: handleVoiceMessage,
+    onClose: () => {
+      voiceWs = null
+      if (voiceRecording.value) stopVoiceRecording()
+    },
+    onError: () => {
+      voiceStatus.value = 'error'
+    }
+  })
+}
+
+async function startVoiceRecording() {
+  stopVoiceAudio()
+  resetVoiceAudio()
+  currentStreamingMsgIndex.value = -1
+
+  if (!chatStore.currentThreadId) {
+    await chatStore.createThread(agentStore.selectedAgentId)
+    if (!chatStore.currentThreadId) return
+  }
+
+  connectVoiceWebSocket()
+
+  const checkAndStart = () => {
+    if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+      sendControl(voiceWs, 'start')
+      startCapture()
+      voiceRecording.value = true
+    } else if (voiceWs) {
+      setTimeout(checkAndStart, 100)
+    }
+  }
+  checkAndStart()
+}
+
+function stopVoiceRecording() {
+  stopCapture()
+  stopVoiceAudio()
+  resetVoiceAudio()
+  currentStreamingMsgIndex.value = -2
+  voiceRecording.value = false
+  voiceInterimTranscript.value = ''
+  if (voiceWs) {
+    voiceWs.close()
+    voiceWs = null
+  }
+  voiceStatus.value = 'idle'
+}
+
+function toggleVoiceRecording() {
+  if (voiceRecording.value) {
+    stopVoiceRecording()
+  } else {
+    startVoiceRecording()
+  }
+}
+
 // 初始化
 onMounted(async () => {
   if (!agentStore.isInitialized) {
@@ -161,6 +361,7 @@ onMounted(async () => {
 
 // 切换智能体时重新加载会话列表
 watch(() => agentStore.selectedAgentId, async (newId) => {
+  if (voiceRecording.value) stopVoiceRecording()
   if (newId) {
     chatStore.reset()
     await chatStore.loadThreads(newId)
@@ -224,7 +425,7 @@ async function sendMessage(text) {
   let threadId = chatStore.currentThreadId
   if (!threadId) {
     const result = await chatStore.createThread(agentId)
-    threadId = result?.thread_id
+    threadId = result?.id
     if (!threadId) return
   }
 
@@ -238,8 +439,9 @@ async function sendMessage(text) {
   try {
     const response = await agentApi.sendAgentMessage(agentId, {
       query: content,
-      thread_id: threadId,
-      config: {}
+      config: {
+        thread_id: threadId
+      }
     })
 
     if (!response.body) throw new Error('无响应体')
@@ -262,10 +464,19 @@ async function sendMessage(text) {
         if (!trimmed) continue
         try {
           const chunk = JSON.parse(trimmed)
-          if (chunk.type === 'token' && chunk.content) {
-            assistantContent += chunk.content
-            chatStore.updateLastAssistantMessage(assistantContent)
-            scrollToBottom()
+          if (chunk.status === 'error') {
+            chatStore.updateLastAssistantMessage('⚠️ ' + (chunk.error_message || '请求失败'))
+            break
+          }
+          if (chunk.status === 'loading' && chunk.response) {
+            const msg = chunk.msg || {}
+            const msgType = (msg.type || '').toLowerCase()
+            // 跳过 tool 类型消息，只显示 AI 文本
+            if (msgType !== 'tool' && !msgType.includes('tool')) {
+              assistantContent += chunk.response
+              chatStore.updateLastAssistantMessage(assistantContent)
+              scrollToBottom()
+            }
           }
         } catch {}
       }
@@ -275,9 +486,13 @@ async function sendMessage(text) {
     if (buffer.trim()) {
       try {
         const chunk = JSON.parse(buffer.trim())
-        if (chunk.type === 'token' && chunk.content) {
-          assistantContent += chunk.content
-          chatStore.updateLastAssistantMessage(assistantContent)
+        if (chunk.status === 'loading' && chunk.response) {
+          const msg = chunk.msg || {}
+          const msgType = (msg.type || '').toLowerCase()
+          if (msgType !== 'tool' && !msgType.includes('tool')) {
+            assistantContent += chunk.response
+            chatStore.updateLastAssistantMessage(assistantContent)
+          }
         }
       } catch {}
     }
@@ -297,11 +512,18 @@ function handleSend() {
 }
 
 function handleLogout() {
+  stopVoiceRecording()
   userStore.logout()
   chatStore.reset()
   agentStore.reset()
   router.push('/login')
 }
+
+onUnmounted(() => {
+  if (voiceWs) voiceWs.close()
+  stopCapture()
+  stopVoiceAudio()
+})
 </script>
 
 <style lang="less" scoped>
@@ -555,6 +777,74 @@ function handleLogout() {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+// 语音输入区
+.voice-input-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.voice-interim {
+  font-size: 14px;
+  color: var(--gray-500);
+  font-style: italic;
+  text-align: center;
+  max-width: 400px;
+  word-break: break-all;
+}
+
+.voice-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.voice-status-text {
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+.voice-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-primary-500);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &.recording {
+    background: #ef4444;
+  }
+
+  &.error {
+    background: var(--gray-400);
+  }
+
+  .voice-level {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid var(--color-primary-300);
+    transition: transform 0.1s;
+    pointer-events: none;
+  }
+
+  &.recording .voice-level {
+    border-color: rgba(239, 68, 68, 0.4);
+  }
 }
 
 // 智能体选择弹窗
