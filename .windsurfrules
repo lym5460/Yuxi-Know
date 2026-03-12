@@ -1,0 +1,56 @@
+# 📋 Project Rules
+
+> 此文件用于存储项目特定的规则和约定，AI 会在对话中自动遵守这些规则。
+> 全局规则（持续对话等）已在 ~/.codeium/windsurf/memories/global_rules.md 中配置。
+
+---
+
+## 项目概述
+- 项目类型: 智能知识库与知识图谱智能体开发平台
+- 主要语言: Python 3.12+ (后端), JavaScript/Vue 3 (前端)
+- 框架: FastAPI + LangGraph v1 + LightRAG (后端), Vue.js 3 + Vite (前端)
+- 数据库: PostgreSQL + Milvus(向量) + Neo4j(图谱) + Redis(缓存/队列)
+- 版本: v0.5.1，依赖管理使用 uv
+
+---
+
+## 代码规范
+- 使用中文注释
+- Python: pythonic 风格，3.12+ 新语法，ruff 格式化（行宽 120）
+- 前端 JS: 函数/方法命名 camelCase，类命名 PascalCase
+- 前端样式: Less，优先使用 `web/src/assets/css/base.css` 中的颜色变量
+- API 接口定义在 `web/src/apis/` 下
+- Icon 优先使用 lucide-vue-next（注意尺寸），备选 @ant-design/icons-vue
+
+---
+
+## 架构规则
+- `server/`: FastAPI 入口 + 路由层，路由文件按领域划分（chat/knowledge/graph 等）
+- `src/`: 核心业务逻辑，agents/knowledge/models/plugins/repositories/services
+- `src/agents/`: 智能体通过 AgentManager 自动发现注册，子目录需含 `__init__.py` 并导出 BaseAgent 子类
+- `src/knowledge/`: 知识库系统，含文档分块/索引/图谱构建/多实现适配
+- `web/src/`: Vue 前端，views/components/apis/stores/composables
+- 异步 Worker 基于 arq，处理文档解析等耗时任务
+- 全栈 Docker Compose 编排，api/web 均支持热重载
+
+---
+
+## 桌面端 (desktop/) 开发规则
+- 基于 Tauri + Vue 3 + Vite + Pinia，样式使用 Less
+- 颜色变量统一在 `desktop/src/assets/css/base.css`，深色科技风主题（青 #00d4ff 为主色）
+- Canvas 组件（VoiceAvatar/AudioVisualizer）必须使用 **ResizeObserver** 监听容器尺寸变化，不能仅靠 window.resize（侧边栏折叠等场景会导致容器尺寸变化但不触发 window.resize）
+- 语音智能体通过 `capabilities.includes('voice')` 判断，WebSocket 连接切换对话时必须断开重建
+- 侧边栏支持两种模式：pinned（固定占位）/ auto（绝对定位 overlay + 悬浮展开），语音智能体自动切 auto 模式
+- 编译命令: `cd desktop && pnpm run build`
+
+---
+
+## 待办/注意事项
+- Docker 服务依赖链: api 依赖 postgres/redis/milvus/minio，web 依赖 api
+- 修改代码后无需重启容器，热重载自动生效
+- 调试接口使用 YUXI_SUPER_ADMIN_NAME / YUXI_SUPER_ADMIN_PASSWORD 环境变量（读 .env）
+
+---
+
+trigger: always_on
+alwaysApply: true

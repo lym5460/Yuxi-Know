@@ -92,7 +92,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(0, 212, 255, 0.4);
 
   p { margin: 0; font-size: 14px; }
 }

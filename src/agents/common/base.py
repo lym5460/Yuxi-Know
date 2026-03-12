@@ -32,6 +32,7 @@ class BaseAgent:
         self.workdir = Path(sys_config.save_dir) / "agents" / self.module_name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self._metadata_cache = None  # Cache for metadata to avoid repeated file reads
+        self._has_checkpointer: bool | None = None  # 缓存 checkpointer 检查结果，避免每次都调用 get_graph
 
     @property
     def module_name(self) -> str:
@@ -50,6 +51,9 @@ class BaseAgent:
         if include_configurable_items:
             configurable_items = self.context_schema.get_configurable_items()
 
+        # has_checkpointer: 使用缓存值或延迟检查（避免列表接口触发完整 graph 构建）
+        has_checkpointer = self._has_checkpointer if self._has_checkpointer is not None else True
+
         # Merge metadata with class attributes, metadata takes precedence
         return {
             "id": self.id,
@@ -57,7 +61,7 @@ class BaseAgent:
             "description": metadata.get("description", getattr(self, "description", "Unknown")),
             "examples": metadata.get("examples", []),
             "configurable_items": configurable_items,
-            "has_checkpointer": await self.check_checkpointer(),
+            "has_checkpointer": has_checkpointer,
             "capabilities": getattr(self, "capabilities", []),  # 智能体能力列表
         }
 
@@ -120,11 +124,15 @@ class BaseAgent:
         return msg
 
     async def check_checkpointer(self):
+        if self._has_checkpointer is not None:
+            return self._has_checkpointer
         app = await self.get_graph()
         if not hasattr(app, "checkpointer") or app.checkpointer is None:
             logger.warning(f"智能体 {self.name} 的 Graph 未配置 checkpointer，无法获取历史记录")
-            return False
-        return True
+            self._has_checkpointer = False
+        else:
+            self._has_checkpointer = True
+        return self._has_checkpointer
 
     async def get_history(self, user_id, thread_id) -> list[dict]:
         """获取历史消息"""
@@ -156,6 +164,7 @@ class BaseAgent:
     def reload_graph(self):
         """重置 graph 缓存，强制下次调用 get_graph 时重新构建"""
         self.graph = None
+        self._has_checkpointer = None
         logger.info(f"{self.name} graph 缓存已清空，将在下次调用时重新构建")
 
     @abstractmethod

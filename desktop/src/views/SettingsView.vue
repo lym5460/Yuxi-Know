@@ -1,5 +1,6 @@
 <template>
   <div class="settings-view">
+    <TitleBar transparent />
     <div class="settings-card">
       <h2 class="settings-title">服务器设置</h2>
       <p class="settings-desc">配置KGRAG-曼析服务端地址以连接您的智能体平台</p>
@@ -38,6 +39,7 @@ import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Globe } from 'lucide-vue-next'
 import { useServerStore } from '@/stores/server'
+import TitleBar from '@/components/TitleBar.vue'
 
 const router = useRouter()
 const serverStore = useServerStore()
@@ -100,22 +102,38 @@ async function handleSave() {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: var(--gray-50);
+  background: var(--gray-0);
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(0, 212, 255, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 50%, rgba(0, 140, 255, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+  }
 }
 
 .settings-card {
   width: 420px;
   padding: 40px;
-  background: #fff;
+  background: var(--glass-bg);
   border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), var(--glow-primary-sm);
+  position: relative;
+  backdrop-filter: blur(12px);
 }
 
 .settings-title {
   margin: 0 0 4px;
   font-size: 22px;
   font-weight: 600;
-  color: var(--gray-900);
+  color: var(--color-primary-500);
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
 }
 
 .settings-desc {

@@ -1,19 +1,34 @@
 <template>
   <div class="chat-view">
-    <!-- 侧边栏 -->
-    <div class="sidebar">
-      <div class="sidebar-header">
+    <!-- 自定义标题栏 -->
+    <TitleBar>
+      <template #left>
         <div class="agent-selector" @click="showAgentModal = true">
-          <Bot :size="18" />
+          <Bot :size="16" />
           <span class="agent-name">{{ agentStore.currentAgentName || '选择智能体' }}</span>
-          <ChevronDown :size="14" />
+          <ChevronDown :size="12" />
         </div>
         <button class="icon-btn" @click="handleNewChat" title="新对话">
-          <Plus :size="18" />
+          <Plus :size="16" />
         </button>
-      </div>
+      </template>
+    </TitleBar>
 
-      <div class="thread-list">
+    <div class="chat-body">
+      <!-- 侧边栏 -->
+      <div
+        class="sidebar"
+        :class="{ collapsed: sidebarMode === 'auto' && !sidebarOpen, overlay: sidebarMode === 'auto' }"
+        @mouseenter="sidebarMode === 'auto' && (sidebarOpen = true)"
+        @mouseleave="sidebarMode === 'auto' && (sidebarOpen = false)"
+      >
+        <div class="sidebar-header-row">
+          <button class="sidebar-pin-btn" @click="toggleSidebarMode" :title="sidebarMode === 'pinned' ? '切换为自动收起' : '固定侧边栏'">
+            <Pin v-if="sidebarMode === 'pinned'" :size="13" />
+            <PinOff v-else :size="13" />
+          </button>
+        </div>
+        <div class="thread-list">
         <div
           v-for="thread in chatStore.threads"
           :key="thread.id"
@@ -36,19 +51,63 @@
         </div>
       </div>
 
-      <div class="sidebar-footer">
-        <button class="icon-btn" @click="$router.push('/settings')" title="设置">
-          <Settings :size="18" />
-        </button>
-        <button class="icon-btn" @click="handleLogout" title="退出登录">
-          <LogOut :size="18" />
-        </button>
+        <div class="sidebar-footer">
+          <button class="icon-btn" @click="$router.push('/settings')" title="设置">
+            <Settings :size="18" />
+          </button>
+          <button class="icon-btn" @click="handleLogout" title="退出登录">
+            <LogOut :size="18" />
+          </button>
+        </div>
       </div>
-    </div>
 
-    <!-- 主聊天区 -->
-    <div class="chat-main">
-      <!-- 消息列表 -->
+      <!-- 侧边栏悬浮触发区域（auto 模式且收起时显示） -->
+      <div
+        v-if="sidebarMode === 'auto' && !sidebarOpen"
+        class="sidebar-trigger"
+        @mouseenter="sidebarOpen = true"
+      >
+        <div class="sidebar-trigger-indicator" />
+      </div>
+
+      <!-- 主聊天区 -->
+      <div class="chat-main">
+
+      <!-- 语音智能体：数字人 + 浮现消息 -->
+      <template v-if="isVoiceAgent">
+        <div class="voice-stage">
+          <VoiceAvatar :audio-level="voiceAudioLevel" :status="voiceStatus" class="voice-avatar" />
+          <FloatingChat :messages="chatStore.messages" :interim="voiceInterimTranscript" class="voice-floating" />
+        </div>
+        <div class="voice-bar">
+          <div class="voice-viz-strip">
+            <AudioVisualizer :audio-level="voiceAudioLevel" :active="isVoiceActive" class="viz-canvas" />
+          </div>
+          <div class="voice-controls">
+            <button class="voice-mode-btn" @click="toggleVoiceMode" :title="voiceMode === 'pushToTalk' ? '切换为持续对话' : '切换为按住说话'">
+              <Hand v-if="voiceMode === 'pushToTalk'" :size="14" />
+              <MousePointerClick v-else :size="14" />
+              <span>{{ voiceMode === 'pushToTalk' ? '按住说话' : '持续对话' }}</span>
+            </button>
+            <button
+              class="voice-btn"
+              :class="{
+                recording: voiceMode === 'continuous' ? voiceRecording : spaceHeld,
+                connected: voiceMode === 'pushToTalk' && voiceRecording && !spaceHeld,
+                error: voiceStatus === 'error',
+                hangup: voiceMode === 'continuous' && voiceRecording
+              }"
+              @click="voiceMode === 'continuous' ? toggleVoiceRecording() : (voiceRecording ? stopVoiceRecording() : null)"
+            >
+              <PhoneOff v-if="voiceMode === 'continuous' && voiceRecording" :size="18" />
+              <Mic v-else :size="18" />
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- 文本智能体：标准消息列表 -->
+      <template v-else>
       <div class="messages-area" ref="messagesRef">
         <div v-if="chatStore.isLoadingMessages" class="loading-state">
           <LoaderCircle :size="24" class="spin" />
@@ -82,37 +141,8 @@
         </template>
       </div>
 
-      <!-- 语音输入区 -->
-      <div v-if="isVoiceAgent" class="input-area voice-input-area">
-        <div v-if="voiceInterimTranscript" class="voice-interim">
-          {{ voiceInterimTranscript }}
-        </div>
-        <div class="voice-controls">
-          <button class="voice-mode-btn" @click="toggleVoiceMode" :title="voiceMode === 'pushToTalk' ? '切换为持续对话' : '切换为按住说话'">
-            <Hand v-if="voiceMode === 'pushToTalk'" :size="16" />
-            <MousePointerClick v-else :size="16" />
-            <span>{{ voiceMode === 'pushToTalk' ? '按住说话' : '持续对话' }}</span>
-          </button>
-          <span class="voice-status-text">{{ voiceStatusText }}</span>
-          <button
-            class="voice-btn"
-            :class="{
-              recording: voiceMode === 'continuous' ? voiceRecording : spaceHeld,
-              connected: voiceMode === 'pushToTalk' && voiceRecording && !spaceHeld,
-              error: voiceStatus === 'error'
-            }"
-            @click="voiceMode === 'continuous' ? toggleVoiceRecording() : (voiceRecording ? stopVoiceRecording() : null)"
-          >
-            <div v-if="voiceMode === 'continuous' ? voiceRecording : spaceHeld" class="voice-level" :style="{ transform: `scale(${1 + voiceAudioLevel * 0.8})` }"></div>
-            <PhoneOff v-if="voiceMode === 'continuous' && voiceRecording" :size="24" />
-            <PhoneOff v-else-if="voiceMode === 'pushToTalk' && voiceRecording" :size="20" />
-            <Mic v-else :size="24" />
-          </button>
-        </div>
-      </div>
-
       <!-- 文本输入区 -->
-      <div v-else class="input-area">
+      <div class="input-area">
         <div class="input-wrapper">
           <textarea
             ref="inputRef"
@@ -133,6 +163,9 @@
           </button>
         </div>
       </div>
+      </template>
+    </div>
+
     </div>
 
     <!-- 智能体选择弹窗 -->
@@ -163,7 +196,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   Bot, ChevronDown, Plus, MessageSquare, Settings, LogOut,
   SendHorizontal, LoaderCircle, Mic, MicOff, PhoneOff, Trash2,
-  Hand, MousePointerClick
+  Hand, MousePointerClick, PanelLeftClose, PanelLeftOpen, Pin, PinOff
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
@@ -176,6 +209,10 @@ import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useVideoWindow } from '@/composables/useTauriIntegration'
 import { useServerStore } from '@/stores/server'
 import ChatMessage from '@/components/ChatMessage.vue'
+import TitleBar from '@/components/TitleBar.vue'
+import AudioVisualizer from '@/components/AudioVisualizer.vue'
+import VoiceAvatar from '@/components/VoiceAvatar.vue'
+import FloatingChat from '@/components/FloatingChat.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -186,6 +223,8 @@ const { openVideoWindow, closeVideoWindow, sendMediaCommand } = useVideoWindow()
 
 const userInput = ref('')
 const showAgentModal = ref(false)
+const sidebarMode = ref('pinned') // 'pinned' | 'auto'
+const sidebarOpen = ref(true)      // auto 模式下是否展开
 const messagesRef = ref(null)
 const inputRef = ref(null)
 
@@ -204,6 +243,11 @@ const voiceRecording = ref(false)
 const voiceInterimTranscript = ref('')
 const voiceAudioLevel = ref(0)
 let voiceWs = null
+
+// 音频可视化
+const isVoiceActive = computed(() => {
+  return voiceMode.value === 'continuous' ? voiceRecording.value : spaceHeld.value
+})
 const currentStreamingMsgIndex = ref(-1)
 
 const voiceMode = ref('continuous') // 'pushToTalk' | 'continuous'
@@ -236,6 +280,7 @@ const {
 
 const {
   startCapture,
+  pauseCapture,
   stopCapture,
   error: captureError
 } = useAudioCapture({
@@ -254,11 +299,9 @@ function handleVoiceMessage(msg) {
       if (!voiceRecording.value && msg.status === 'listening') break
       voiceStatus.value = msg.status
       if (msg.status === 'idle' && voiceRecording.value) {
-        if (voiceMode.value === 'continuous') {
-          sendControl(voiceWs, 'start')
-          voiceStatus.value = 'listening'
-        }
-        // pushToTalk 模式下不自动重启监听，等待用户按空格
+        // 两种模式都自动重启监听，pushToTalk 仅通过空格控制音频采集
+        sendControl(voiceWs, 'start')
+        voiceStatus.value = 'listening'
       }
       if (msg.status === 'listening' && currentStreamingMsgIndex.value === -2) {
         currentStreamingMsgIndex.value = -1
@@ -346,8 +389,13 @@ function handleVoiceMessage(msg) {
     }
     case 'error':
       console.error('Voice error:', msg.error)
-      voiceStatus.value = 'error'
       currentStreamingMsgIndex.value = -1
+      if (voiceMode.value === 'pushToTalk' && voiceRecording.value) {
+        // pushToTalk: 静默重置连接，下次按空格重新建连
+        stopVoiceRecording()
+      } else {
+        voiceStatus.value = 'error'
+      }
       break
   }
 }
@@ -368,6 +416,7 @@ function connectVoiceWebSocket() {
 }
 
 async function startVoiceRecording() {
+  if (sidebarMode.value === 'auto') sidebarOpen.value = false
   stopVoiceAudio()
   resetVoiceAudio()
   currentStreamingMsgIndex.value = -1
@@ -436,8 +485,7 @@ function handleKeyDown(e) {
   if (!voiceRecording.value) {
     startVoiceRecording()
   } else {
-    // 恢复音频捕获并通知后端重新开始监听
-    if (voiceWs) sendControl(voiceWs, 'start')
+    // 恢复音频捕获（后端会话通过 auto-restart 保持活跃）
     startCapture()
   }
 }
@@ -447,8 +495,7 @@ function handleKeyUp(e) {
   e.preventDefault()
   spaceHeld.value = false
   if (voiceRecording.value) {
-    stopCapture()
-    if (voiceWs) sendControl(voiceWs, 'stop')
+    pauseCapture()
   }
 }
 
@@ -478,8 +525,27 @@ watch(() => agentStore.selectedAgentId, async (newId) => {
   }
 })
 
-// 切换会话时加载历史
+// 语音智能体自动切换侧边栏为 auto 模式
+watch(isVoiceAgent, (val) => {
+  if (val) {
+    sidebarMode.value = 'auto'
+    sidebarOpen.value = false
+  }
+}, { immediate: true })
+
+function toggleSidebarMode() {
+  if (sidebarMode.value === 'pinned') {
+    sidebarMode.value = 'auto'
+    sidebarOpen.value = false
+  } else {
+    sidebarMode.value = 'pinned'
+    sidebarOpen.value = true
+  }
+}
+
+// 切换会话时加载历史，并断开旧的语音连接
 watch(() => chatStore.currentThreadId, async (threadId) => {
+  if (voiceRecording.value) stopVoiceRecording()
   if (threadId && agentStore.selectedAgentId) {
     await chatStore.loadHistory(agentStore.selectedAgentId, threadId)
     scrollToBottom()
@@ -661,45 +727,140 @@ onUnmounted(() => {
 <style lang="less" scoped>
 .chat-view {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  background: var(--gray-0);
+}
+
+.chat-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
 }
 
 // 侧边栏
 .sidebar {
   width: 260px;
   background: var(--gray-50);
-  border-right: 1px solid var(--gray-200);
+  border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  position: relative;
+  transition: width 0.25s ease, transform 0.25s ease;
+  overflow: hidden;
+  z-index: 20;
+
+  // overlay 模式：绝对定位不占空间
+  &.overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.3);
+  }
+
+  &.collapsed {
+    width: 0;
+    border-right: none;
+    box-shadow: none;
+
+    .thread-list, .sidebar-footer, .sidebar-header-row {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    &::after { display: none; }
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 1px;
+    height: 100%;
+    background: linear-gradient(180deg, transparent, rgba(0, 212, 255, 0.15), transparent);
+    pointer-events: none;
+  }
 }
 
-.sidebar-header {
+.sidebar-header-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 8px 0;
+  flex-shrink: 0;
+}
+
+.sidebar-pin-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid var(--gray-200);
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--gray-500);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--color-primary-500);
+    background: rgba(0, 212, 255, 0.08);
+  }
+}
+
+// 侧边栏悬浮触发区域
+.sidebar-trigger {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  z-index: 15;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+
+  .sidebar-trigger-indicator {
+    width: 3px;
+    height: 48px;
+    margin-left: 4px;
+    border-radius: 3px;
+    background: rgba(0, 212, 255, 0.15);
+    transition: all 0.25s;
+  }
+
+  &:hover .sidebar-trigger-indicator {
+    height: 64px;
+    background: rgba(0, 212, 255, 0.5);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+  }
 }
 
 .agent-selector {
-  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--gray-800);
-  transition: background 0.15s;
+  color: var(--color-primary-500);
+  transition: all 0.2s;
+  border: 1px solid transparent;
 
-  &:hover { background: var(--gray-200); }
+  &:hover {
+    background: rgba(0, 212, 255, 0.08);
+    border-color: var(--glass-border);
+  }
 
   .agent-name {
-    flex: 1;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -713,15 +874,16 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-sm);
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--gray-600);
+  color: var(--gray-500);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.2s;
 
   &:hover {
-    background: var(--gray-200);
-    color: var(--gray-800);
+    background: rgba(0, 212, 255, 0.08);
+    color: var(--color-primary-500);
+    border-color: var(--glass-border);
   }
 }
 
@@ -739,19 +901,25 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
-  color: var(--gray-700);
-  transition: background 0.15s;
+  color: var(--gray-600);
+  transition: all 0.2s;
+  border: 1px solid transparent;
 
-  &:hover { background: var(--gray-200); }
+  &:hover {
+    background: rgba(0, 212, 255, 0.06);
+    border-color: var(--glass-border);
+    color: var(--gray-800);
+  }
 
   &.active {
-    background: var(--gray-200);
-    color: var(--gray-900);
+    background: rgba(0, 212, 255, 0.1);
+    border-color: rgba(0, 212, 255, 0.2);
+    color: var(--color-primary-500);
     font-weight: 500;
   }
 
   .thread-delete-btn {
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
     width: 24px;
@@ -763,15 +931,16 @@ onUnmounted(() => {
     cursor: pointer;
     flex-shrink: 0;
     padding: 0;
-    transition: color 0.15s;
+    opacity: 0;
+    transition: color 0.2s, opacity 0.2s;
 
     &:hover {
-      color: #ef4444;
+      color: var(--color-danger-500);
     }
   }
 
   &:hover .thread-delete-btn {
-    display: flex;
+    opacity: 1;
   }
 
   .thread-title {
@@ -793,7 +962,7 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   padding: 12px;
-  border-top: 1px solid var(--gray-200);
+  border-top: 1px solid var(--glass-border);
 }
 
 // 主聊天区
@@ -802,6 +971,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: var(--gray-0);
 }
 
 .messages-area {
@@ -824,7 +994,8 @@ onUnmounted(() => {
   h3 {
     margin: 0;
     font-size: 20px;
-    color: var(--gray-800);
+    color: var(--color-primary-500);
+    text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
   }
   p {
     margin: 0;
@@ -835,7 +1006,8 @@ onUnmounted(() => {
   }
   .empty-icon {
     color: var(--color-primary-500);
-    opacity: 0.5;
+    opacity: 0.6;
+    filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.4));
   }
 }
 
@@ -850,38 +1022,54 @@ onUnmounted(() => {
 
 .example-btn {
   padding: 8px 14px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--glass-border);
   border-radius: 20px;
-  background: var(--gray-0);
-  color: var(--gray-700);
+  background: rgba(0, 212, 255, 0.04);
+  color: var(--gray-600);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.25s;
+  backdrop-filter: blur(8px);
 
   &:hover {
-    border-color: var(--color-primary-500);
+    border-color: rgba(0, 212, 255, 0.4);
     color: var(--color-primary-500);
+    background: rgba(0, 212, 255, 0.08);
+    box-shadow: var(--glow-primary-sm);
   }
 }
 
 // 输入区
 .input-area {
   padding: 12px 20px 16px;
-  border-top: 1px solid var(--gray-200);
+  border-top: 1px solid var(--glass-border);
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.2), transparent);
+    pointer-events: none;
+  }
 }
 
 .input-wrapper {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: var(--gray-50);
-  border: 1px solid var(--gray-200);
+  background: var(--gray-100);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: 8px 12px;
-  transition: border-color 0.15s;
+  transition: all 0.25s;
 
   &:focus-within {
-    border-color: var(--color-primary-500);
+    border-color: rgba(0, 212, 255, 0.4);
+    box-shadow: var(--glow-primary-sm);
   }
 
   textarea {
@@ -911,18 +1099,18 @@ onUnmounted(() => {
   border-radius: 50%;
   border: none;
   background: var(--color-primary-500);
-  color: #fff;
+  color: var(--gray-0);
   cursor: pointer;
   flex-shrink: 0;
-  transition: opacity 0.15s;
+  transition: all 0.25s;
 
   &:disabled {
-    opacity: 0.4;
+    opacity: 0.3;
     cursor: not-allowed;
   }
 
   &:not(:disabled):hover {
-    opacity: 0.9;
+    box-shadow: var(--glow-primary);
   }
 }
 
@@ -935,97 +1123,139 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-// 语音输入区
-.voice-input-area {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
+// 语音模式 - 数字人舞台
+.voice-stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, rgba(0, 20, 40, 0.6) 0%, var(--gray-0) 70%);
 }
 
-.voice-interim {
-  font-size: 14px;
-  color: var(--gray-500);
-  font-style: italic;
-  text-align: center;
-  max-width: 400px;
-  word-break: break-all;
+.voice-avatar {
+  width: 100%;
+  height: 100%;
+}
+
+.voice-floating {
+  position: absolute;
+  inset: 0;
+}
+
+// 语音底栏
+.voice-bar {
+  flex-shrink: 0;
+  border-top: 1px solid var(--glass-border);
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.2), transparent);
+    pointer-events: none;
+  }
+}
+
+.voice-viz-strip {
+  width: 100%;
+  height: 48px;
+  background: rgba(0, 10, 20, 0.5);
+}
+
+.viz-canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .voice-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
 }
 
 .voice-mode-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--gray-200);
-  background: var(--gray-50);
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 212, 255, 0.04);
   color: var(--gray-600);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
   white-space: nowrap;
 
   &:hover {
-    border-color: var(--color-primary-500);
+    border-color: rgba(0, 212, 255, 0.4);
     color: var(--color-primary-500);
+    box-shadow: var(--glow-primary-sm);
   }
-}
-
-.voice-status-text {
-  font-size: 13px;
-  color: var(--gray-500);
 }
 
 .voice-btn {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  border: none;
-  background: var(--color-primary-500);
-  color: #fff;
+  border: 2px solid rgba(0, 212, 255, 0.4);
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--color-primary-500);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s;
 
   &:hover {
-    opacity: 0.9;
+    background: rgba(0, 212, 255, 0.15);
+    border-color: rgba(0, 212, 255, 0.6);
+    box-shadow: 0 0 16px rgba(0, 212, 255, 0.3);
   }
 
   &.recording {
-    background: #ef4444;
+    background: rgba(0, 212, 255, 0.12);
+    border-color: rgba(0, 212, 255, 0.6);
+    color: var(--color-primary-500);
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+    animation: pulseGlow 2s ease-in-out infinite;
   }
 
   &.connected {
-    background: var(--color-primary-100);
+    background: rgba(0, 212, 255, 0.06);
+    border-color: rgba(0, 212, 255, 0.25);
     color: var(--color-primary-600);
   }
 
   &.error {
-    background: var(--gray-400);
+    background: rgba(255, 56, 96, 0.08);
+    border-color: rgba(255, 56, 96, 0.3);
+    color: var(--gray-400);
   }
 
-  .voice-level {
-    position: absolute;
-    inset: -4px;
-    border-radius: 50%;
-    border: 2px solid var(--color-primary-300);
-    transition: transform 0.1s;
-    pointer-events: none;
-  }
+  &.hangup {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #ef4444;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.3);
+    animation: none;
 
-  &.recording .voice-level {
-    border-color: rgba(239, 68, 68, 0.4);
+    &:hover {
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.75);
+      box-shadow: 0 0 22px rgba(239, 68, 68, 0.5);
+    }
   }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 12px rgba(0, 212, 255, 0.4); }
+  50% { box-shadow: 0 0 24px rgba(0, 212, 255, 0.6); }
 }
 
 // 智能体选择弹窗
@@ -1037,16 +1267,21 @@ onUnmounted(() => {
 
 .agent-card {
   padding: 14px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: all 0.25s;
+  background: rgba(0, 212, 255, 0.02);
 
-  &:hover { border-color: var(--color-primary-500); }
+  &:hover {
+    border-color: rgba(0, 212, 255, 0.4);
+    box-shadow: var(--glow-primary-sm);
+  }
 
   &.selected {
     border-color: var(--color-primary-500);
-    background: var(--color-primary-50);
+    background: rgba(0, 212, 255, 0.08);
+    box-shadow: var(--glow-primary-sm);
   }
 
   .agent-card-name {

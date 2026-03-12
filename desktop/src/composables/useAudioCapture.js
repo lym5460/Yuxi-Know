@@ -67,6 +67,12 @@ export function useAudioCapture(options = {}) {
     audioBuffer = []
     isSpeaking.value = false
 
+    // 如果管线已存在（暂停状态），直接恢复，无需重新申请麦克风
+    if (processor && audioContext && mediaStream) {
+      isCapturing.value = true
+      return
+    }
+
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -160,6 +166,14 @@ export function useAudioCapture(options = {}) {
     }
   }
 
+  function pauseCapture() {
+    isCapturing.value = false
+    isSpeaking.value = false
+    speechDetected = false
+    silenceStart = null
+    audioBuffer = []
+  }
+
   function stopCapture() {
     if (processor) {
       processor.disconnect()
@@ -191,6 +205,7 @@ export function useAudioCapture(options = {}) {
     error,
     requestPermission,
     startCapture,
+    pauseCapture,
     stopCapture
   }
 }

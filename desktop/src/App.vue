@@ -9,9 +9,11 @@ import { computed } from 'vue'
 import { theme } from 'ant-design-vue'
 
 const themeConfig = computed(() => ({
-  algorithm: theme.defaultAlgorithm,
+  algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#4080ff',
+    colorPrimary: '#00d4ff',
+    colorBgBase: '#0a0e17',
+    colorTextBase: '#e4eaf2',
     borderRadius: 8
   }
 }))

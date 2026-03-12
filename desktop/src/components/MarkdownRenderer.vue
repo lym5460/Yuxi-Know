@@ -7,7 +7,7 @@ import { computed } from 'vue'
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
+import 'highlight.js/styles/github-dark.css'
 
 const props = defineProps({
   content: { type: String, default: '' }
@@ -45,6 +45,7 @@ const renderedHtml = computed(() => {
   line-height: 1.7;
   font-size: 14px;
   word-break: break-word;
+  color: var(--gray-800);
 
   :deep(p) {
     margin: 0 0 8px;
@@ -52,8 +53,8 @@ const renderedHtml = computed(() => {
   }
 
   :deep(pre) {
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
+    background: var(--gray-100);
+    border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
     padding: 12px;
     overflow-x: auto;
@@ -66,7 +67,8 @@ const renderedHtml = computed(() => {
   }
 
   :deep(code:not(pre code)) {
-    background: var(--gray-100);
+    background: rgba(0, 212, 255, 0.08);
+    color: var(--color-primary-500);
     padding: 2px 5px;
     border-radius: 3px;
     font-size: 13px;
@@ -82,7 +84,7 @@ const renderedHtml = computed(() => {
     padding: 4px 12px;
     border-left: 3px solid var(--color-primary-500);
     color: var(--gray-600);
-    background: var(--gray-50);
+    background: rgba(0, 212, 255, 0.04);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   }
 
@@ -92,26 +94,31 @@ const renderedHtml = computed(() => {
     margin: 8px 0;
 
     th, td {
-      border: 1px solid var(--gray-200);
+      border: 1px solid var(--glass-border);
       padding: 6px 10px;
       text-align: left;
     }
     th {
-      background: var(--gray-50);
+      background: rgba(0, 212, 255, 0.06);
       font-weight: 600;
+      color: var(--gray-900);
     }
   }
 
   :deep(a) {
     color: var(--color-primary-500);
     text-decoration: none;
-    &:hover { text-decoration: underline; }
+    &:hover {
+      text-decoration: underline;
+      text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+    }
   }
 
   :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
     margin: 16px 0 8px;
     font-weight: 600;
     line-height: 1.4;
+    color: var(--gray-900);
   }
 }
 </style>

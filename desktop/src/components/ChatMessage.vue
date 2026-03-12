@@ -41,7 +41,7 @@ defineProps({
   }
 
   &.role-assistant {
-    background: var(--gray-50);
+    background: rgba(0, 212, 255, 0.03);
   }
 }
 
@@ -60,11 +60,14 @@ defineProps({
   .user-avatar {
     background: var(--gray-200);
     color: var(--gray-600);
+    border: 1px solid var(--gray-300);
   }
 
   .assistant-avatar {
-    background: var(--color-primary-500);
-    color: #fff;
+    background: rgba(0, 212, 255, 0.15);
+    color: var(--color-primary-500);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
   }
 }
 
@@ -97,6 +100,7 @@ defineProps({
   animation: blink 1s infinite;
   vertical-align: text-bottom;
   border-radius: 1px;
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
 }
 
 @keyframes blink {

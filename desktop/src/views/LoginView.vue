@@ -1,5 +1,6 @@
 <template>
   <div class="login-view">
+    <TitleBar transparent />
     <div class="login-card">
       <h2 class="login-title">登录KGRAG-曼析</h2>
       <p class="login-server">
@@ -39,6 +40,7 @@ import { useRouter } from 'vue-router'
 import { Globe } from 'lucide-vue-next'
 import { useUserStore } from '@/stores/user'
 import { useServerStore } from '@/stores/server'
+import TitleBar from '@/components/TitleBar.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -82,22 +84,38 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: var(--gray-50);
+  background: var(--gray-0);
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(0, 212, 255, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 50%, rgba(0, 140, 255, 0.04) 0%, transparent 50%);
+    pointer-events: none;
+  }
 }
 
 .login-card {
   width: 400px;
   padding: 40px;
-  background: #fff;
+  background: var(--glass-bg);
   border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), var(--glow-primary-sm);
+  position: relative;
+  backdrop-filter: blur(12px);
 }
 
 .login-title {
   margin: 0 0 8px;
   font-size: 22px;
   font-weight: 600;
-  color: var(--gray-900);
+  color: var(--color-primary-500);
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
 }
 
 .login-server {
@@ -114,6 +132,7 @@ async function handleLogin() {
     cursor: pointer;
     &:hover {
       text-decoration: underline;
+      text-shadow: 0 0 6px rgba(0, 212, 255, 0.4);
     }
   }
 }
