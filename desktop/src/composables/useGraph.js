@@ -1,0 +1,68 @@
+import { ref, reactive, nextTick } from 'vue'
+
+export function useGraph(graphRef) {
+  const fetching = ref(false)
+  const showDetailDrawer = ref(false)
+  const selectedItem = ref(null)
+  const selectedItemType = ref(null)
+
+  const graphData = reactive({
+    nodes: [],
+    edges: []
+  })
+
+  const handleNodeClick = (nodeData) => {
+    selectedItem.value = nodeData
+    selectedItemType.value = 'node'
+    showDetailDrawer.value = true
+  }
+
+  const handleEdgeClick = (edgeData) => {
+    selectedItem.value = edgeData
+    selectedItemType.value = 'edge'
+    showDetailDrawer.value = true
+  }
+
+  const handleCanvasClick = () => {
+    showDetailDrawer.value = false
+    selectedItem.value = null
+    selectedItemType.value = null
+    if (graphRef && graphRef.value && graphRef.value.clearFocus) {
+      graphRef.value.clearFocus()
+    }
+  }
+
+  const clearGraph = () => {
+    graphData.nodes = []
+    graphData.edges = []
+    handleCanvasClick()
+  }
+
+  const updateGraphData = (nodes, edges) => {
+    graphData.nodes = nodes || []
+    graphData.edges = edges || []
+    refreshGraph()
+  }
+
+  const refreshGraph = () => {
+    nextTick(() => {
+      if (graphRef && graphRef.value && graphRef.value.refreshGraph) {
+        graphRef.value.refreshGraph()
+      }
+    })
+  }
+
+  return {
+    fetching,
+    graphData,
+    showDetailDrawer,
+    selectedItem,
+    selectedItemType,
+    handleNodeClick,
+    handleEdgeClick,
+    handleCanvasClick,
+    clearGraph,
+    updateGraphData,
+    refreshGraph
+  }
+}

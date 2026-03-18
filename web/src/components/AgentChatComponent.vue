@@ -169,8 +169,7 @@
             </div>
 
             <div v-else-if="!conversations.length" class="chat-examples">
-              <div style="margin-bottom: 150px"></div>
-              <h1>您好，我是{{ currentAgentName }}！</h1>
+              <div class="chat-examples-greeting">您好，我是{{ currentAgentName }}！</div>
             </div>
             <div class="chat-box" ref="messagesContainer">
               <div class="conv-box" v-for="(conv, index) in conversations" :key="index">
@@ -2589,6 +2588,20 @@ watch(configSaveVersion, () => {
 
 .agent-panel-wrapper.no-transition {
   transition: none !important;
+}
+
+.chat-examples {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
+
+  .chat-examples-greeting {
+    font-size: 1.5rem;
+    color: var(--gray-1000);
+  }
 }
 
 .chat-examples-input {

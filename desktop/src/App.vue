@@ -1,5 +1,5 @@
 <template>
-  <a-config-provider :theme="themeConfig">
+  <a-config-provider :theme="themeConfig" :locale="zhCN">
     <router-view />
   </a-config-provider>
 </template>
@@ -7,6 +7,7 @@
 <script setup>
 import { computed } from 'vue'
 import { theme } from 'ant-design-vue'
+import zhCN from 'ant-design-vue/es/locale/zh_CN'
 
 const themeConfig = computed(() => ({
   algorithm: theme.darkAlgorithm,

@@ -11,6 +11,12 @@
         <button class="icon-btn" @click="handleNewChat" title="新对话">
           <Plus :size="16" />
         </button>
+        <button class="icon-btn" @click="showConfigDrawer = true" title="智能体配置">
+          <SlidersHorizontal :size="16" />
+        </button>
+        <button class="icon-btn" @click="$router.push('/graph')" title="知识图谱">
+          <Waypoints :size="16" />
+        </button>
       </template>
     </TitleBar>
 
@@ -108,60 +114,117 @@
 
       <!-- 文本智能体：标准消息列表 -->
       <template v-else>
-      <div class="messages-area" ref="messagesRef">
-        <div v-if="chatStore.isLoadingMessages" class="loading-state">
-          <LoaderCircle :size="24" class="spin" />
-          <span>加载消息中...</span>
-        </div>
+      <div class="chat-content-wrapper">
+        <div class="chat-content-main">
+          <div class="messages-area" ref="messagesRef">
+            <div v-if="chatStore.isLoadingMessages" class="loading-state">
+              <LoaderCircle :size="24" class="spin" />
+              <span>加载消息中...</span>
+            </div>
 
-        <div v-else-if="!chatStore.messages.length" class="empty-state">
-          <Bot :size="48" class="empty-icon" />
-          <h3>{{ agentStore.currentAgentName || '智能助手' }}</h3>
-          <p>{{ agentStore.currentAgent?.description || '有什么可以帮你的？' }}</p>
-          <div v-if="exampleQuestions.length" class="examples">
-            <button
-              v-for="(q, i) in exampleQuestions"
-              :key="i"
-              class="example-btn"
-              @click="sendMessage(q)"
-            >
-              {{ q }}
-            </button>
+            <div v-else-if="!chatStore.messages.length" class="empty-state">
+              <Bot :size="48" class="empty-icon" />
+              <h3>{{ agentStore.currentAgentName || '智能助手' }}</h3>
+              <p>{{ agentStore.currentAgent?.description || '有什么可以帮你的？' }}</p>
+              <div v-if="exampleQuestions.length" class="examples">
+                <button
+                  v-for="(q, i) in exampleQuestions"
+                  :key="i"
+                  class="example-btn"
+                  @click="sendMessage(q)"
+                >
+                  {{ q }}
+                </button>
+              </div>
+            </div>
+
+            <template v-else>
+              <ChatMessage
+                v-for="(msg, i) in chatStore.messages"
+                :key="i"
+                :message="msg"
+                :agent-name="agentStore.currentAgentName"
+                :is-streaming="chatStore.isProcessing && i === chatStore.messages.length - 1 && msg.role === 'assistant'"
+                :tool-calls="chatStore.isProcessing && i === chatStore.messages.length - 1 && msg.role === 'assistant' ? chatStore.activeToolCalls : (msg.toolCalls || [])"
+              />
+            </template>
+          </div>
+
+          <!-- 文本输入区 -->
+          <div class="input-area">
+            <!-- 图片预览 & 附件列表 -->
+            <div v-if="pendingImage || attachments.length" class="upload-preview">
+              <div v-if="pendingImage" class="preview-image-wrap">
+                <img :src="`data:${pendingImage.mimeType};base64,${pendingImage.thumbnailContent || pendingImage.imageContent}`" :alt="pendingImage.originalName" />
+                <button class="preview-remove" @click="removePendingImage"><X :size="12" /></button>
+              </div>
+              <div
+                v-for="att in attachments"
+                :key="att.file_id"
+                class="attachment-chip"
+              >
+                <span class="attachment-name">{{ att.file_name }}</span>
+                <span v-if="att.status === 'parsed'" class="attachment-status">已解析</span>
+                <button class="attachment-remove" @click="removeAttachment(att.file_id)"><X :size="11" /></button>
+              </div>
+            </div>
+            <div class="input-wrapper">
+              <button
+                v-if="hasAgentStateContent"
+                class="state-toggle-btn"
+                :class="{ active: agentPanelOpen }"
+                @click="agentPanelOpen = !agentPanelOpen"
+                title="查看工作状态"
+              >
+                <FolderCode :size="16" />
+              </button>
+              <a-tooltip v-if="supportsFileUpload" title="支持 txt/md/docx/html 格式 ≤ 5MB" placement="top">
+                <button class="upload-btn" :disabled="isUploading" @click="handleFileSelect">
+                  <Paperclip :size="16" />
+                </button>
+              </a-tooltip>
+              <a-tooltip v-if="supportsFileUpload" title="支持 jpg/jpeg/png/gif ≤ 10MB" placement="top">
+                <button class="upload-btn" :disabled="isUploading" @click="handleImageSelect">
+                  <ImagePlus :size="16" />
+                </button>
+              </a-tooltip>
+              <textarea
+                ref="inputRef"
+                v-model="userInput"
+                :disabled="chatStore.isProcessing"
+                placeholder="输入消息..."
+                rows="1"
+                @keydown.enter.exact.prevent="handleSend"
+                @input="autoResize"
+              />
+              <button
+                v-if="chatStore.isProcessing"
+                class="stop-btn"
+                @click="handleStopGeneration"
+                title="停止生成"
+              >
+                <Square :size="14" />
+              </button>
+              <button
+                v-else
+                class="send-btn"
+                :disabled="!userInput.trim() && !pendingImage"
+                @click="handleSend"
+              >
+                <SendHorizontal :size="18" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <template v-else>
-          <ChatMessage
-            v-for="(msg, i) in chatStore.messages"
-            :key="i"
-            :message="msg"
-            :agent-name="agentStore.currentAgentName"
-            :is-streaming="chatStore.isProcessing && i === chatStore.messages.length - 1 && msg.role === 'assistant'"
-          />
-        </template>
-      </div>
-
-      <!-- 文本输入区 -->
-      <div class="input-area">
-        <div class="input-wrapper">
-          <textarea
-            ref="inputRef"
-            v-model="userInput"
-            :disabled="chatStore.isProcessing"
-            placeholder="输入消息..."
-            rows="1"
-            @keydown.enter.exact.prevent="handleSend"
-            @input="autoResize"
-          />
-          <button
-            class="send-btn"
-            :disabled="!userInput.trim() || chatStore.isProcessing"
-            @click="handleSend"
-          >
-            <SendHorizontal v-if="!chatStore.isProcessing" :size="18" />
-            <LoaderCircle v-else :size="18" class="spin" />
-          </button>
-        </div>
+        <!-- AgentState 面板 -->
+        <AgentStatePanel
+          v-if="agentPanelOpen && hasAgentStateContent"
+          :agent-state="chatStore.agentState"
+          class="agent-state-panel-wrapper"
+          @close="agentPanelOpen = false"
+          @refresh="refreshAgentState"
+        />
       </div>
       </template>
     </div>
@@ -188,6 +251,12 @@
         </div>
       </div>
     </a-modal>
+
+    <!-- 智能体配置抽屉 -->
+    <AgentConfigDrawer
+      :open="showConfigDrawer"
+      @close="showConfigDrawer = false"
+    />
   </div>
 </template>
 
@@ -196,13 +265,17 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import {
   Bot, ChevronDown, Plus, MessageSquare, Settings, LogOut,
   SendHorizontal, LoaderCircle, Mic, MicOff, PhoneOff, Trash2,
-  Hand, MousePointerClick, PanelLeftClose, PanelLeftOpen, Pin, PinOff
+  Hand, MousePointerClick, PanelLeftClose, PanelLeftOpen, Pin, PinOff,
+  SlidersHorizontal, Square, FolderCode, Paperclip, ImagePlus, X, Waypoints
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
 import { useUserStore } from '@/stores/user'
-import { agentApi, threadApi } from '@/apis'
+import { message } from 'ant-design-vue'
+import { open as tauriOpen } from '@tauri-apps/plugin-dialog'
+import { readFile } from '@tauri-apps/plugin-fs'
+import { agentApi, threadApi, multimodalApi } from '@/apis'
 import { createVoiceWebSocket, sendAudio, sendControl, saveVoiceMessage } from '@/apis/voice_api'
 import { useAudioCapture } from '@/composables/useAudioCapture'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
@@ -213,6 +286,8 @@ import TitleBar from '@/components/TitleBar.vue'
 import AudioVisualizer from '@/components/AudioVisualizer.vue'
 import VoiceAvatar from '@/components/VoiceAvatar.vue'
 import FloatingChat from '@/components/FloatingChat.vue'
+import AgentConfigDrawer from '@/components/AgentConfigDrawer.vue'
+import AgentStatePanel from '@/components/AgentStatePanel.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -223,14 +298,65 @@ const { openVideoWindow, closeVideoWindow, sendMediaCommand } = useVideoWindow()
 
 const userInput = ref('')
 const showAgentModal = ref(false)
+const showConfigDrawer = ref(false)
+const agentPanelOpen = ref(false)
 const sidebarMode = ref('pinned') // 'pinned' | 'auto'
 const sidebarOpen = ref(true)      // auto 模式下是否展开
 const messagesRef = ref(null)
 const inputRef = ref(null)
 
+// 文件上传状态
+const pendingImage = ref(null) // { imageContent, thumbnailContent, mimeType, originalName }
+const attachments = ref([])
+const isUploading = ref(false)
+
+const supportsFileUpload = computed(() => {
+  const caps = agentStore.currentAgent?.capabilities || []
+  return caps.includes('file_upload') && !isVoiceAgent.value
+})
+
 const exampleQuestions = computed(() => {
   return agentStore.currentAgent?.examples || []
 })
+
+// AgentState 面板：检查是否有内容可显示
+const hasAgentStateContent = computed(() => {
+  const s = chatStore.agentState
+  if (!s) return false
+  const todoCount = Array.isArray(s.todos) ? s.todos.length : 0
+  const fileCount = s.files ? Object.keys(s.files).length : 0
+  return todoCount > 0 || fileCount > 0
+})
+
+async function refreshAgentState() {
+  const agentId = agentStore.selectedAgentId
+  const threadId = chatStore.currentThreadId
+  if (!agentId || !threadId) return
+  try {
+    const res = await agentApi.getAgentState(agentId, threadId)
+    chatStore.setAgentState(res?.agent_state || null)
+  } catch {}
+}
+
+async function fetchAgentState() {
+  const agentId = agentStore.selectedAgentId
+  const threadId = chatStore.currentThreadId
+  if (!agentId || !threadId) return
+  try {
+    const res = await agentApi.getAgentState(agentId, threadId)
+    chatStore.setAgentState(res?.agent_state || null)
+    // 有内容时自动展开面板
+    if (res?.agent_state) {
+      const todos = res.agent_state.todos || []
+      const files = res.agent_state.files || {}
+      if (todos.length > 0 || Object.keys(files).length > 0) {
+        agentPanelOpen.value = true
+      }
+    }
+  } catch {
+    chatStore.setAgentState(null)
+  }
+}
 
 // 语音模式
 const isVoiceAgent = computed(() => {
@@ -522,14 +648,21 @@ watch(() => agentStore.selectedAgentId, async (newId) => {
   if (newId) {
     chatStore.reset()
     await chatStore.loadThreads(newId)
+    // 自动选中最新的对话
+    if (chatStore.threads.length) {
+      chatStore.selectThread(chatStore.threads[0].id)
+    }
   }
 })
 
-// 语音智能体自动切换侧边栏为 auto 模式
+// 语音智能体自动收起侧边栏，非语音智能体固定显示
 watch(isVoiceAgent, (val) => {
   if (val) {
     sidebarMode.value = 'auto'
     sidebarOpen.value = false
+  } else {
+    sidebarMode.value = 'pinned'
+    sidebarOpen.value = true
   }
 }, { immediate: true })
 
@@ -546,9 +679,17 @@ function toggleSidebarMode() {
 // 切换会话时加载历史，并断开旧的语音连接
 watch(() => chatStore.currentThreadId, async (threadId) => {
   if (voiceRecording.value) stopVoiceRecording()
+  // 新建 thread 时跳过 loadHistory，消息由 sendMessage / 语音回调管理
+  if (chatStore.isCreatingThread) return
+  chatStore.setAgentState(null)
+  agentPanelOpen.value = false
+  pendingImage.value = null
+  attachments.value = []
   if (threadId && agentStore.selectedAgentId) {
     await chatStore.loadHistory(agentStore.selectedAgentId, threadId)
     scrollToBottom()
+    fetchAgentState()
+    loadAttachments(threadId)
   }
 })
 
@@ -578,30 +719,168 @@ async function selectAgent(agentId) {
 
 async function handleNewChat() {
   if (!agentStore.selectedAgentId) return
+  // 当前对话为空时不重复创建
+  if (chatStore.currentThreadId && chatStore.messages.length === 0) return
   await chatStore.createThread(agentStore.selectedAgentId)
 }
 
 function switchThread(threadId) {
+  if (threadId === chatStore.currentThreadId) return
   chatStore.selectThread(threadId)
 }
 
 async function deleteThread(threadId) {
   if (!threadId) return
+  const wasActive = chatStore.currentThreadId === threadId
   try {
     await threadApi.deleteThread(threadId)
-    if (chatStore.currentThreadId === threadId) {
-      chatStore.selectThread(null)
-      chatStore.messages = []
-    }
     await chatStore.loadThreads(agentStore.selectedAgentId)
+    if (wasActive) {
+      if (chatStore.threads.length) {
+        chatStore.selectThread(chatStore.threads[0].id)
+      } else {
+        await chatStore.createThread(agentStore.selectedAgentId)
+      }
+    }
   } catch (e) {
     console.error('删除对话失败:', e)
   }
 }
 
+// 文件上传相关
+async function loadAttachments(threadId) {
+  if (!threadId) return
+  try {
+    const result = await threadApi.getThreadAttachments(threadId)
+    attachments.value = result?.attachments || []
+  } catch {
+    attachments.value = []
+  }
+}
+
+const MIME_MAP = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif' }
+
+async function handleImageSelect() {
+  const allowedImageExts = ['jpg', 'jpeg', 'png', 'gif']
+  const selected = await tauriOpen({
+    multiple: false,
+    title: '选择图片',
+    filters: [{ name: '图片', extensions: allowedImageExts }]
+  })
+  if (!selected) return
+  const filePath = String(Array.isArray(selected) ? selected[0] : selected)
+  const ext = filePath.split('.').pop()?.toLowerCase()
+  if (!ext || !allowedImageExts.includes(ext)) {
+    message.error(`不支持的图片格式，仅支持 ${allowedImageExts.join(', ')}`)
+    return
+  }
+
+  isUploading.value = true
+  const hide = message.loading('图片上传中...', 0)
+  try {
+    const content = await readFile(filePath)
+    if (content.byteLength > 10 * 1024 * 1024) {
+      message.error('图片文件过大，请选择小于 10MB 的图片')
+      return
+    }
+    const fileName = filePath.split('/').pop()
+    const ext = fileName.split('.').pop().toLowerCase()
+    const file = new File([content], fileName, { type: MIME_MAP[ext] || 'image/jpeg' })
+
+    const result = await multimodalApi.uploadImage(file)
+    if (result?.image_content) {
+      pendingImage.value = {
+        imageContent: result.image_content,
+        thumbnailContent: result.thumbnail_content,
+        mimeType: result.mime_type,
+        originalName: fileName
+      }
+      message.success('图片上传成功')
+    }
+  } catch (err) {
+    message.error('图片上传失败: ' + (err.message || '未知错误'))
+  } finally {
+    hide()
+    isUploading.value = false
+  }
+}
+
+async function handleFileSelect() {
+  const allowedFileExts = ['txt', 'md', 'docx', 'html', 'htm']
+  const selected = await tauriOpen({
+    multiple: true,
+    title: '选择附件',
+    filters: [{ name: '文档', extensions: allowedFileExts }]
+  })
+  if (!selected) return
+  const rawPaths = Array.isArray(selected) ? selected : [selected]
+  // 过滤不支持的文件类型
+  const paths = rawPaths.filter(p => {
+    const ext = String(p).split('.').pop()?.toLowerCase()
+    if (!ext || !allowedFileExts.includes(ext)) {
+      message.error(`不支持的文件类型：${String(p).split('/').pop()}，仅支持 ${allowedFileExts.join(', ')}`)
+      return false
+    }
+    return true
+  })
+  if (!paths.length) return
+
+  const agentId = agentStore.selectedAgentId
+  if (!agentId) return
+
+  // 确保有 thread
+  if (!chatStore.currentThreadId) {
+    await chatStore.createThread(agentId)
+    if (!chatStore.currentThreadId) return
+  }
+  const threadId = chatStore.currentThreadId
+
+  isUploading.value = true
+  const hide = message.loading('附件上传中...', 0)
+  let successCount = 0
+  try {
+    for (const filePath of paths) {
+      const content = await readFile(String(filePath))
+      if (content.byteLength > 5 * 1024 * 1024) {
+        message.error(`文件 ${String(filePath).split('/').pop()} 过大，单个附件不超过 5MB`)
+        continue
+      }
+      const fileName = String(filePath).split('/').pop()
+      const file = new File([content], fileName)
+      await threadApi.uploadThreadAttachment(threadId, file)
+      successCount++
+    }
+    await loadAttachments(threadId)
+    if (successCount > 0) {
+      message.success(`${successCount} 个附件上传成功`)
+    }
+  } catch (err) {
+    message.error('附件上传失败: ' + (err.message || '未知错误'))
+  } finally {
+    hide()
+    isUploading.value = false
+  }
+}
+
+function removePendingImage() {
+  pendingImage.value = null
+}
+
+async function removeAttachment(fileId) {
+  const threadId = chatStore.currentThreadId
+  if (!threadId || !fileId) return
+  try {
+    await threadApi.deleteThreadAttachment(threadId, fileId)
+    attachments.value = attachments.value.filter(a => a.file_id !== fileId)
+  } catch (err) {
+    console.error('删除附件失败:', err)
+  }
+}
+
 async function sendMessage(text) {
   const content = text || userInput.value.trim()
-  if (!content || chatStore.isProcessing) return
+  if (!content && !pendingImage.value) return
+  if (chatStore.isProcessing) return
 
   const agentId = agentStore.selectedAgentId
   if (!agentId) return
@@ -623,24 +902,42 @@ async function sendMessage(text) {
   if (chatStore.messages.length === 0) {
     const autoTitle = content.replace(/\s+/g, ' ').trim().slice(0, 30)
     if (autoTitle) {
+      const thread = chatStore.threads.find(t => t.id === threadId)
+      if (thread) thread.title = autoTitle
       threadApi.updateThread(threadId, autoTitle).catch(() => {})
     }
   }
 
   // 添加用户消息
-  chatStore.addMessage({ role: 'user', content })
+  const userMsg = { role: 'user', content }
+  if (pendingImage.value) {
+    userMsg.imageContent = pendingImage.value.imageContent
+  }
+  chatStore.addMessage(userMsg)
   chatStore.isProcessing = true
+  chatStore.clearToolCalls()
 
   // 添加空的助手消息
   chatStore.addMessage({ role: 'assistant', content: '' })
 
+  // 创建 AbortController 用于切换对话时中止流
+  const controller = new AbortController()
+  chatStore.setAbortController(controller)
+  const targetThreadId = threadId
+
   try {
-    const response = await agentApi.sendAgentMessage(agentId, {
+    const requestData = {
       query: content,
       config: {
         thread_id: threadId
       }
-    })
+    }
+    if (pendingImage.value) {
+      requestData.image_content = pendingImage.value.imageContent
+    }
+    pendingImage.value = null
+
+    const response = await agentApi.sendAgentMessage(agentId, requestData, { signal: controller.signal })
 
     if (!response.body) throw new Error('无响应体')
 
@@ -666,11 +963,52 @@ async function sendMessage(text) {
             chatStore.updateLastAssistantMessage('⚠️ ' + (chunk.error_message || '请求失败'))
             break
           }
-          if (chunk.status === 'loading' && chunk.response) {
+          if (chunk.status === 'finished') {
+            break
+          }
+          if (chunk.status === 'agent_state' && chunk.agent_state) {
+            chatStore.setAgentState(chunk.agent_state)
+            const todos = chunk.agent_state.todos || []
+            const files = chunk.agent_state.files || {}
+            if (todos.length > 0 || Object.keys(files).length > 0) {
+              agentPanelOpen.value = true
+            }
+          }
+          if (chunk.status === 'loading') {
             const msg = chunk.msg || {}
             const msgType = (msg.type || '').toLowerCase()
-            // 跳过 tool 类型消息，只显示 AI 文本
-            if (msgType !== 'tool' && !msgType.includes('tool')) {
+
+            // 提取 tool call 信息（完整 tool_calls 或增量 tool_call_chunks）
+            if (msg.tool_calls?.length) {
+              for (const tc of msg.tool_calls) {
+                const name = tc.name || tc.function?.name
+                if (!name) continue
+                let args = tc.args || tc.function?.arguments
+                if (typeof args === 'string') { try { args = JSON.parse(args) } catch { args = null } }
+                if (args) {
+                  chatStore.addToolCall({ id: tc.id, name, args, status: 'calling' })
+                }
+              }
+              scrollToBottom()
+            } else if (msg.tool_call_chunks?.length) {
+              // 处理增量 tool_call_chunks，提取名称以尽早显示
+              for (const tc of msg.tool_call_chunks) {
+                const name = tc.name
+                if (!name) continue
+                chatStore.addToolCall({ id: tc.id, name, args: {}, status: 'calling' })
+              }
+              scrollToBottom()
+            }
+
+            // 标记 tool 执行完成，附带结果
+            if (msgType === 'tool') {
+              const result = msg.content || chunk.response || ''
+              chatStore.completeToolCall(msg.tool_call_id, msg.name, result)
+              scrollToBottom()
+            }
+
+            // AI 文本
+            if (chunk.response && msgType !== 'tool' && !msgType.includes('tool')) {
               assistantContent += chunk.response
               chatStore.updateLastAssistantMessage(assistantContent)
               scrollToBottom()
@@ -698,11 +1036,24 @@ async function sendMessage(text) {
     // 刷新会话列表
     await chatStore.loadThreads(agentId)
   } catch (error) {
+    if (error.name === 'AbortError') return
     console.error('发送消息失败:', error)
-    chatStore.updateLastAssistantMessage('⚠️ 发送失败: ' + error.message)
+    if (chatStore.currentThreadId === targetThreadId) {
+      chatStore.updateLastAssistantMessage('⚠️ 发送失败: ' + error.message)
+    }
   } finally {
-    chatStore.isProcessing = false
+    // 只有当线程未切换时才执行清理（切换时由 selectThread 处理）
+    if (chatStore.currentThreadId === targetThreadId) {
+      chatStore.saveToolCallsToMessage()
+      chatStore.isProcessing = false
+      chatStore.clearToolCalls()
+    }
+    chatStore.setAbortController(null)
   }
+}
+
+function handleStopGeneration() {
+  chatStore.abortCurrentStream()
 }
 
 function handleSend() {
@@ -974,6 +1325,24 @@ onUnmounted(() => {
   background: var(--gray-0);
 }
 
+.chat-content-wrapper {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.chat-content-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-state-panel-wrapper {
+  width: 300px;
+  flex-shrink: 0;
+}
+
 .messages-area {
   flex: 1;
   overflow-y: auto;
@@ -1059,7 +1428,7 @@ onUnmounted(() => {
 
 .input-wrapper {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
   background: var(--gray-100);
   border: 1px solid var(--glass-border);
@@ -1090,6 +1459,31 @@ onUnmounted(() => {
   }
 }
 
+.state-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-400);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--color-primary-500);
+    background: rgba(0, 212, 255, 0.08);
+  }
+
+  &.active {
+    color: var(--color-primary-500);
+    background: rgba(0, 212, 255, 0.1);
+  }
+}
+
 .send-btn {
   display: flex;
   align-items: center;
@@ -1111,6 +1505,139 @@ onUnmounted(() => {
 
   &:not(:disabled):hover {
     box-shadow: var(--glow-primary);
+  }
+}
+
+.stop-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--gray-400);
+  background: transparent;
+  color: var(--gray-500);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.25s;
+
+  &:hover {
+    border-color: var(--color-danger-500, #ef4444);
+    color: var(--color-danger-500, #ef4444);
+  }
+}
+
+// 上传按钮
+.upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-400);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--color-primary-500);
+    background: rgba(0, 212, 255, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+// 上传预览区
+.upload-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px 8px;
+}
+
+.preview-image-wrap {
+  position: relative;
+  display: inline-block;
+
+  img {
+    display: block;
+    max-width: 80px;
+    max-height: 80px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--glass-border);
+  }
+
+  .preview-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+    z-index: 1;
+    transition: background 0.2s;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.85);
+    }
+  }
+}
+
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  font-size: 12px;
+  color: var(--gray-600);
+
+  .attachment-name {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attachment-status {
+    color: var(--color-primary-500);
+    font-size: 11px;
+  }
+
+  .attachment-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.2s;
+
+    &:hover {
+      color: var(--color-danger-500, #ef4444);
+    }
   }
 }
 

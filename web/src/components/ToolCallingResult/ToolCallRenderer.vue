@@ -9,7 +9,7 @@
   <MediaKnowledgeBaseTool v-else-if="isMediaKnowledgeBaseResult" :tool-call="toolCall" />
 
   <!-- 知识库 -->
-  <KnowledgeBaseTool v-else-if="isKnowledgeBaseResult" :tool-call="toolCall" />
+  <BaseToolCall v-else-if="isKnowledgeBaseResult" :tool-call="toolCall" />
 
   <!-- Chart -->
   <ChartTool v-else-if="isChartResult" :tool-call="toolCall" />
@@ -74,6 +74,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useDatabaseStore } from '@/stores/database'
 import BaseToolCall from './BaseToolCall.vue'
 
 import WebSearchTool from './tools/WebSearchTool.vue'
@@ -103,6 +104,8 @@ const props = defineProps({
     required: true
   }
 })
+
+const databaseStore = useDatabaseStore()
 
 const toolName = computed(() => props.toolCall.name || props.toolCall.function?.name || '')
 
@@ -136,15 +139,17 @@ const isTaskResult = computed(() => {
 })
 
 const isKnowledgeBaseResult = computed(() => {
-  const databaseInfo = databases.value.find((db) => db.name === toolName.value)
-  if (databaseInfo && databaseInfo.kb_type !== 'lightrag') {
+  const dbs = databaseStore.databases || []
+  const databaseInfo = dbs.find((db) => db.name === toolName.value)
+  if (databaseInfo && databaseInfo.kb_type !== 'lightrag' && databaseInfo.kb_type !== 'memeries') {
     return true
   }
   return false
 })
 
 const isMediaKnowledgeBaseResult = computed(() => {
-  const databaseInfo = databases.value.find((db) => db.name === toolName.value)
+  const dbs = databaseStore.databases || []
+  const databaseInfo = dbs.find((db) => db.name === toolName.value)
   return databaseInfo && databaseInfo.kb_type === 'memeries'
 })
 

@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from './base'
+import { apiGet, apiPost, apiPut, apiDelete } from './base'
 import { useUserStore } from '@/stores/user'
 import { useServerStore } from '@/stores/server'
 
@@ -48,6 +48,33 @@ export const agentApi = {
       },
       ...restOptions
     })
+  },
+
+  getAgentConfigs: (agentId) => apiGet(`/api/chat/agent/${agentId}/configs`),
+
+  getAgentConfigProfile: (agentId, configId) =>
+    apiGet(`/api/chat/agent/${agentId}/configs/${configId}`),
+
+  updateAgentConfigProfile: (agentId, configId, payload) =>
+    apiPut(`/api/chat/agent/${agentId}/configs/${configId}`, payload),
+
+  getAgentState: (agentId, threadId) =>
+    apiGet(`/api/chat/agent/${agentId}/state?thread_id=${threadId}`)
+}
+
+// 系统资源 API（用于配置编辑时获取可选项）
+export const systemApi = {
+  getConfig: () => apiGet('/api/system/config'),
+  getTools: () => apiGet('/api/system/tools'),
+  getSkills: () => apiGet('/api/system/skills'),
+  getAccessibleDatabases: () => apiGet('/api/knowledge/databases/accessible')
+}
+
+export const multimodalApi = {
+  uploadImage: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiPost('/api/chat/image/upload', formData)
   }
 }
 
@@ -63,8 +90,20 @@ export const threadApi = {
     }),
 
   updateThread: (threadId, title) =>
-    apiPost(`/api/chat/thread/${threadId}`, { title }),
+    apiPut(`/api/chat/thread/${threadId}`, { title }),
 
   deleteThread: (threadId) =>
-    apiDelete(`/api/chat/thread/${threadId}`)
+    apiDelete(`/api/chat/thread/${threadId}`),
+
+  uploadThreadAttachment: (threadId, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiPost(`/api/chat/thread/${threadId}/attachments`, formData)
+  },
+
+  getThreadAttachments: (threadId) =>
+    apiGet(`/api/chat/thread/${threadId}/attachments`),
+
+  deleteThreadAttachment: (threadId, fileId) =>
+    apiDelete(`/api/chat/thread/${threadId}/attachments/${fileId}`)
 }

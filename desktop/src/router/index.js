@@ -26,6 +26,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/graph',
+      name: 'Graph',
+      component: () => import('@/views/GraphView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/video',
       name: 'Video',
       component: () => import('@/views/VideoWindow.vue')

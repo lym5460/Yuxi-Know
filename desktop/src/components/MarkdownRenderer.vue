@@ -1,124 +1,101 @@
 <template>
-  <div class="markdown-body" v-html="renderedHtml"></div>
+  <div class="markdown-renderer" @click="handleClick">
+    <MdPreview
+      editorId="desktop-preview"
+      :modelValue="content"
+      previewTheme="github"
+      :theme="'dark'"
+      :showCodeRowNumber="false"
+      class="md-preview"
+    />
+  </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { Marked } from 'marked'
-import { markedHighlight } from 'marked-highlight'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css'
+import { MdPreview } from 'md-editor-v3'
+import 'md-editor-v3/lib/preview.css'
+import { open } from '@tauri-apps/plugin-shell'
 
-const props = defineProps({
+defineProps({
   content: { type: String, default: '' }
 })
 
-const marked = new Marked(
-  markedHighlight({
-    langPrefix: 'hljs language-',
-    highlight(code, lang) {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value
-      }
-      return hljs.highlightAuto(code).value
-    }
-  })
-)
-
-marked.setOptions({
-  breaks: true,
-  gfm: true
-})
-
-const renderedHtml = computed(() => {
-  if (!props.content) return ''
-  try {
-    return marked.parse(props.content)
-  } catch {
-    return props.content
+function handleClick(e) {
+  const anchor = e.target.closest('a[href]')
+  if (!anchor) return
+  const href = anchor.getAttribute('href')
+  if (href && /^https?:\/\//.test(href)) {
+    e.preventDefault()
+    open(href)
   }
-})
+}
 </script>
 
 <style lang="less" scoped>
-.markdown-body {
+.markdown-renderer {
   line-height: 1.7;
   font-size: 14px;
   word-break: break-word;
   color: var(--gray-800);
 
-  :deep(p) {
-    margin: 0 0 8px;
-    &:last-child { margin-bottom: 0; }
+  // 去除 md-editor-v3 默认的外层 padding 和背景
+  :deep(.md-editor) {
+    background: transparent;
   }
 
-  :deep(pre) {
-    background: var(--gray-100);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    overflow-x: auto;
-    margin: 8px 0;
-
-    code {
-      font-size: 13px;
-      font-family: 'SF Mono', 'Fira Code', monospace;
-    }
+  :deep(.md-editor-preview-wrapper) {
+    padding: 0;
   }
 
-  :deep(code:not(pre code)) {
-    background: rgba(0, 212, 255, 0.08);
-    color: var(--color-primary-500);
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-size: 13px;
-  }
+  :deep(.md-editor-preview) {
+    padding: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--gray-800);
 
-  :deep(ul), :deep(ol) {
-    padding-left: 20px;
-    margin: 4px 0;
-  }
-
-  :deep(blockquote) {
-    margin: 8px 0;
-    padding: 4px 12px;
-    border-left: 3px solid var(--color-primary-500);
-    color: var(--gray-600);
-    background: rgba(0, 212, 255, 0.04);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  }
-
-  :deep(table) {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 8px 0;
-
-    th, td {
+    // 代码块
+    pre {
+      background: var(--gray-100) !important;
       border: 1px solid var(--glass-border);
-      padding: 6px 10px;
-      text-align: left;
-    }
-    th {
-      background: rgba(0, 212, 255, 0.06);
-      font-weight: 600;
-      color: var(--gray-900);
-    }
-  }
+      border-radius: var(--radius-sm);
 
-  :deep(a) {
-    color: var(--color-primary-500);
-    text-decoration: none;
-    &:hover {
-      text-decoration: underline;
-      text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+      code {
+        font-size: 13px;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+      }
     }
-  }
 
-  :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
-    margin: 16px 0 8px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--gray-900);
+    // 行内代码
+    code:not(pre code) {
+      background: rgba(0, 212, 255, 0.08);
+      color: var(--color-primary-500);
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+
+    // 链接
+    a {
+      color: var(--color-primary-500);
+      text-decoration: none;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    // 引用块
+    blockquote {
+      border-left: 3px solid var(--color-primary-500);
+      color: var(--gray-600);
+      background: rgba(0, 212, 255, 0.04);
+    }
+
+    // 表格
+    table {
+      th {
+        background: rgba(0, 212, 255, 0.06);
+      }
+    }
   }
 }
 </style>
