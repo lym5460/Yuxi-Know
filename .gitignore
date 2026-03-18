@@ -68,3 +68,5 @@ docs/vibe
 .cursorrules
 
 /models
+deploy-package/
+scripts/build_deploy_package.sh
