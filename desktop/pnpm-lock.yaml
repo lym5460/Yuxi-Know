@@ -32,12 +32,21 @@ importers:
       ant-design-vue:
         specifier: ^4.2.6
         version: 4.2.6(vue@3.5.30)
+      highlight.js:
+        specifier: ^11.11.1
+        version: 11.11.1
       less:
         specifier: ^4.5.1
         version: 4.6.2
       lucide-vue-next:
         specifier: ^0.542.0
         version: 0.542.0(vue@3.5.30)
+      marked:
+        specifier: ^17.0.4
+        version: 17.0.4
+      marked-highlight:
+        specifier: ^2.2.3
+        version: 2.2.3(marked@17.0.4)
       md-editor-v3:
         specifier: ^6.4.0
         version: 6.4.0(vue@3.5.30)
@@ -894,6 +903,10 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
+  highlight.js@11.11.1:
+    resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
+    engines: {node: '>=12.0.0'}
+
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
 
@@ -982,6 +995,16 @@ packages:
 
   markdown-it@14.1.1:
     resolution: {integrity: sha512-BuU2qnTti9YKgK5N+IeMubp14ZUKUUw7yeJbkjtosvHiP0AZ5c8IAgEMk79D0eC8F23r4Ac/q8cAIFdm2FtyoA==}
+    hasBin: true
+
+  marked-highlight@2.2.3:
+    resolution: {integrity: sha512-FCfZRxW/msZAiasCML4isYpxyQWKEEx44vOgdn5Kloae+Qc3q4XR7WjpKKf8oMLk7JP9ZCRd2vhtclJFdwxlWQ==}
+    peerDependencies:
+      marked: '>=4 <18'
+
+  marked@17.0.4:
+    resolution: {integrity: sha512-NOmVMM+KAokHMvjWmC5N/ZOvgmSWuqJB8FoYI019j4ogb/PeRMKoKIjReZ2w3376kkA8dSJIP8uD993Kxc0iRQ==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   md-editor-v3@6.4.0:
@@ -2146,6 +2169,8 @@ snapshots:
   graceful-fs@4.2.11:
     optional: true
 
+  highlight.js@11.11.1: {}
+
   hookable@5.5.3: {}
 
   iconv-lite@0.6.3:
@@ -2231,6 +2256,12 @@ snapshots:
       mdurl: 2.0.0
       punycode.js: 2.3.1
       uc.micro: 2.1.0
+
+  marked-highlight@2.2.3(marked@17.0.4):
+    dependencies:
+      marked: 17.0.4
+
+  marked@17.0.4: {}
 
   md-editor-v3@6.4.0(vue@3.5.30):
     dependencies:
