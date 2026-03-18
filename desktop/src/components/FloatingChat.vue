@@ -78,6 +78,9 @@ let lastAssistantContent = ''
 
 watch(() => props.messages, (msgs) => {
   if (!msgs || msgs.length === 0) {
+    fadeTimers.forEach(clearTimeout)
+    fadeTimers = []
+    visibleItems.value = []
     lastProcessedCount = 0
     lastAssistantItemId = null
     lastAssistantContent = ''
