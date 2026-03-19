@@ -3,7 +3,7 @@
     <!-- 自定义标题栏 -->
     <TitleBar>
       <template #left>
-        <div class="agent-selector" @click="showAgentModal = true">
+        <div class="agent-selector" data-no-drag @click="showAgentModal = true">
           <Bot :size="16" />
           <span class="agent-name">{{ agentStore.currentAgentName || '选择智能体' }}</span>
           <ChevronDown :size="12" />

@@ -24,11 +24,6 @@
         "decorations": false
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true,
-      "tooltip": "KGRAG-曼析"
-    },
     "security": {
       "csp": null
     },
