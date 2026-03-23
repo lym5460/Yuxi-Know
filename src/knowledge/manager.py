@@ -490,6 +490,14 @@ class KnowledgeBaseManager:
         kb_instance = await self._get_kb_for_database(db_id)
         return await kb_instance.get_file_basic_info(db_id, file_id)
 
+    async def rename_file(self, db_id: str, file_id: str, new_name: str) -> None:
+        """重命名文件"""
+        kb_instance = await self._get_kb_for_database(db_id)
+        if file_id not in kb_instance.files_meta:
+            raise Exception(f"File not found: {file_id}")
+        kb_instance.files_meta[file_id]["filename"] = new_name
+        await kb_instance._save_metadata()
+
     async def get_file_content(self, db_id: str, file_id: str) -> dict:
         """获取文件内容信息（chunks和lines）"""
         kb_instance = await self._get_kb_for_database(db_id)

@@ -16,6 +16,7 @@ from server.routers.system_router import system
 from server.routers.task_router import tasks
 from server.routers.voice_router import voice
 from server.routers.tool_router import tools
+from server.routers.video_chat_router import video_chat
 
 router = APIRouter()
 
@@ -36,3 +37,4 @@ router.include_router(apikey)  # /api/apikeys/*
 router.include_router(open_api)  # /api/v1/open/*
 router.include_router(skills)  # /api/system/skills/*
 router.include_router(tools)  # /api/system/tools/*
+router.include_router(video_chat)  # /api/video-chat/*

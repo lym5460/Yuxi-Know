@@ -146,6 +146,18 @@ export const documentApi = {
   },
 
   /**
+   * 重命名文档
+   * @param {string} dbId - 知识库ID
+   * @param {string} docId - 文档ID
+   * @param {string} newName - 新名称
+   */
+  renameDocument: async (dbId, docId, newName) => {
+    return apiAdminPut(`/api/knowledge/databases/${dbId}/documents/${docId}/rename`, {
+      new_name: newName
+    })
+  },
+
+  /**
    * 批量删除文档
    * @param {string} dbId - 知识库ID
    * @param {Array} fileIds - 文件ID列表

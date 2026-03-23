@@ -21,6 +21,7 @@
           controls
           autoplay
           class="media-element"
+          @loadedmetadata="handleMediaReady"
         />
         <audio
           v-else
@@ -29,6 +30,7 @@
           controls
           autoplay
           class="audio-element"
+          @loadedmetadata="handleMediaReady"
         />
         <div class="media-info" v-if="details">
           <span v-if="details.resolution_label">{{ details.resolution_label }}</span>
@@ -52,7 +54,8 @@ const props = defineProps({
   videoNo: String,
   fileId: String,
   mediaType: { type: String, default: 'video' },
-  title: { type: String, default: '媒体播放' }
+  title: { type: String, default: '媒体播放' },
+  startTime: { type: Number, default: 0 }
 })
 
 const emit = defineEmits(['update:open'])
@@ -81,9 +84,9 @@ watch(() => [props.open, props.videoNo], async ([open, videoNo]) => {
 
     if (data.video_url) {
       mediaUrl.value = data.video_url
-    } else if (props.fileId) {
-      // Memeries video_url 为空，使用流式播放端点（支持 Range、浏览器缓存）
-      mediaUrl.value = `/api/knowledge/databases/${props.dbId}/documents/${props.fileId}/stream?token=${userStore.token}`
+    } else if (data.file_id || props.fileId) {
+      const fid = data.file_id || props.fileId
+      mediaUrl.value = `/api/knowledge/databases/${props.dbId}/documents/${fid}/stream?token=${userStore.token}`
     } else {
       errorMsg.value = '无法获取播放地址'
     }
@@ -93,6 +96,12 @@ watch(() => [props.open, props.videoNo], async ([open, videoNo]) => {
     loading.value = false
   }
 })
+
+const handleMediaReady = () => {
+  if (props.startTime > 0 && playerRef.value) {
+    playerRef.value.currentTime = props.startTime
+  }
+}
 
 const handleClose = () => {
   if (playerRef.value) {

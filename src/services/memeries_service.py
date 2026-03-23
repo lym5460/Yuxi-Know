@@ -10,6 +10,7 @@
 """
 
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -294,6 +295,46 @@ class MemeriesService:
             response.raise_for_status()
 
             return response.json()
+
+    async def chat_stream(
+        self,
+        video_nos: list[str],
+        prompt: str,
+        session_id: str,
+        unique_id: str,
+    ) -> AsyncIterator[str]:
+        """流式视频对话
+
+        POST /serve/api/v1/chat_stream
+
+        Args:
+            video_nos: 视频 ID 列表
+            prompt: 用户问题
+            session_id: 会话 ID
+            unique_id: 知识库 db_id
+
+        Yields:
+            SSE 数据行
+        """
+        url = f"{self.endpoint}/serve/api/v1/chat_stream"
+        headers = {
+            "Authorization": self.api_key,
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        payload = {
+            "video_nos": video_nos,
+            "prompt": prompt,
+            "session_id": session_id,
+            "unique_id": unique_id,
+        }
+
+        # 流式对话无超时限制（长时间生成）
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30, read=None, write=30, pool=30)) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    yield line
 
     async def delete_videos(
         self,

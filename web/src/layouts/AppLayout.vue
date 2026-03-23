@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed, provide } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { GithubOutlined } from '@ant-design/icons-vue'
-import { Bot, Waypoints, LibraryBig, BarChart3, CircleCheck, Blocks } from 'lucide-vue-next'
+import { Bot, Waypoints, LibraryBig, BarChart3, CircleCheck, Blocks, Clapperboard } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
 import { useDatabaseStore } from '@/stores/database'
@@ -88,6 +88,12 @@ const mainList = computed(() => {
       path: '/database',
       icon: LibraryBig,
       activeIcon: LibraryBig
+    },
+    {
+      name: '长视频分析',
+      path: '/video-chat',
+      icon: Clapperboard,
+      activeIcon: Clapperboard
     }
   ]
 

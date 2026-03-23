@@ -53,7 +53,20 @@
           <Music v-else :size="22" />
         </div>
         <div class="card-body">
-          <div class="card-name" :title="file.filename">{{ file.filename }}</div>
+          <div class="card-name" v-if="renamingFileId !== file.file_id" :title="file.filename">
+            {{ file.filename }}
+          </div>
+          <a-input
+            v-else
+            v-model:value="renameValue"
+            size="small"
+            class="rename-input"
+            @pressEnter="confirmRename(file)"
+            @blur="confirmRename(file)"
+            @keydown.esc="cancelRename"
+            @click.stop
+            autofocus
+          />
           <div class="card-meta">
             <span v-if="file.duration != null" class="meta-item">
               {{ formatDuration(file.duration) }}
@@ -70,6 +83,11 @@
           <a-tooltip v-if="isPlayable(file)" title="播放">
             <a-button type="text" size="small" class="action-btn play-btn" @click="openPlayer(file)">
               <Play :size="14" />
+            </a-button>
+          </a-tooltip>
+          <a-tooltip title="重命名">
+            <a-button type="text" size="small" class="action-btn" @click="startRename(file)">
+              <Pencil :size="14" />
             </a-button>
           </a-tooltip>
           <a-popconfirm
@@ -104,8 +122,10 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useDatabaseStore } from '@/stores/database'
-import { Video, Music, FileUp, Search, RotateCw, Trash2, Play } from 'lucide-vue-next'
+import { documentApi } from '@/apis/knowledge_api'
+import { Video, Music, FileUp, Search, RotateCw, Trash2, Play, Pencil } from 'lucide-vue-next'
 import { formatDuration, formatFileSize } from '@/utils/file_utils'
+import { message } from 'ant-design-vue'
 import MediaPlayerModal from '@/components/MediaPlayerModal.vue'
 
 const emit = defineEmits(['showAddFilesModal'])
@@ -119,6 +139,36 @@ const currentTitle = ref('')
 const currentFileId = ref('')
 
 const refreshing = computed(() => store.state.refrashing)
+
+// 改名
+const renamingFileId = ref('')
+const renameValue = ref('')
+
+const startRename = (file) => {
+  renamingFileId.value = file.file_id
+  renameValue.value = file.filename || ''
+}
+
+const confirmRename = async (file) => {
+  const newName = renameValue.value.trim()
+  if (!newName || newName === file.filename) {
+    renamingFileId.value = ''
+    return
+  }
+  try {
+    await documentApi.renameDocument(store.databaseId, file.file_id, newName)
+    message.success('重命名成功')
+    store.getDatabaseInfo(undefined, true)
+  } catch (e) {
+    message.error(e.message || '重命名失败')
+  } finally {
+    renamingFileId.value = ''
+  }
+}
+
+const cancelRename = () => {
+  renamingFileId.value = ''
+}
 
 const files = computed(() => {
   const all = Object.values(store.database.files || {})
@@ -299,6 +349,10 @@ const handleDelete = (file) => {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.4;
+}
+
+.rename-input {
+  font-size: 13px;
 }
 
 .card-meta {

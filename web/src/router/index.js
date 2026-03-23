@@ -78,6 +78,19 @@ const router = createRouter({
       ]
     },
     {
+      path: '/video-chat',
+      name: 'videoChat',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'VideoChatComp',
+          component: () => import('../views/VideoChatView.vue'),
+          meta: { keepAlive: true, requiresAuth: true, requiresAdmin: true }
+        }
+      ]
+    },
+    {
       path: '/dashboard',
       name: 'dashboard',
       component: AppLayout,

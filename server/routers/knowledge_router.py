@@ -783,6 +783,26 @@ async def delete_document(db_id: str, doc_id: str, current_user: User = Depends(
         raise HTTPException(status_code=400, detail=f"删除文档失败: {e}")
 
 
+@knowledge.put("/databases/{db_id}/documents/{doc_id}/rename")
+async def rename_document(
+    db_id: str,
+    doc_id: str,
+    new_name: str = Body(..., embed=True),
+    current_user: User = Depends(get_admin_user),
+):
+    """重命名文档"""
+    new_name = new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
+
+    try:
+        await knowledge_base.rename_file(db_id, doc_id, new_name)
+        return {"message": "重命名成功"}
+    except Exception as e:
+        logger.error(f"重命名文档失败: {e}")
+        raise HTTPException(status_code=400, detail=f"重命名失败: {e}")
+
+
 @knowledge.get("/databases/{db_id}/documents/{doc_id}/download")
 async def download_document(db_id: str, doc_id: str, request: Request, current_user: User = Depends(get_admin_user)):
     """下载原始文件 - 根据path类型选择本地或MinIO下载"""
@@ -1448,6 +1468,15 @@ async def get_media_details(db_id: str, video_no: str, current_user: User = Depe
     try:
         result = await memeries_service.get_video_details(video_no=video_no, unique_id=db_id)
         data = result.get("data", result)
+
+        # 从知识库 files_meta 中查找对应的 file_id，用于流式播放
+        if not data.get("video_url"):
+            kb_instance = knowledge_base._get_or_create_kb_instance("memeries")
+            for fid, fmeta in kb_instance.files_meta.items():
+                if fmeta.get("memeries_video_no") == video_no:
+                    data["file_id"] = fid
+                    break
+
         return data
     except Exception as e:
         logger.error(f"Failed to get media details for {video_no}: {e}")
