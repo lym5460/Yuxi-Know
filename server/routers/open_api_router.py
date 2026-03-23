@@ -8,7 +8,10 @@
 路由:
 - GET /api/v1/open/knowledge/databases - 获取知识库列表（需要 knowledge:list 权限）
 - POST /api/v1/open/knowledge/databases/{db_id}/query - 查询知识库（需要 knowledge:read 权限）
+- POST /api/v1/open/retrieval - Dify 外部知识库兼容接口（需要 knowledge:read 权限）
 """
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -64,6 +67,39 @@ class QueryResult(BaseModel):
     results: list[QueryResultItem] = Field(default_factory=list, description="查询结果列表")
     total: int = Field(0, description="结果数量")
     status: str = Field("success", description="状态")
+
+
+# --- Dify 外部知识库兼容模型 ---
+
+
+class DifyRetrievalSetting(BaseModel):
+    """Dify 检索设置"""
+
+    top_k: int = Field(3, ge=1, le=50, description="返回结果数量")
+    score_threshold: float = Field(0.5, ge=0.0, le=1.0, description="分数阈值")
+
+
+class DifyRetrievalRequest(BaseModel):
+    """Dify 外部知识库检索请求"""
+
+    knowledge_id: str = Field(..., min_length=1, description="知识库ID")
+    query: str = Field(..., min_length=1, description="查询文本")
+    retrieval_setting: DifyRetrievalSetting = Field(default_factory=DifyRetrievalSetting)
+
+
+class DifyRecord(BaseModel):
+    """Dify 检索结果记录"""
+
+    content: str = Field(..., description="文本内容")
+    score: float = Field(0.0, description="相关度分数")
+    title: str = Field("", description="来源标题")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="元数据")
+
+
+class DifyRetrievalResponse(BaseModel):
+    """Dify 外部知识库检索响应"""
+
+    records: list[DifyRecord] = Field(default_factory=list, description="检索结果列表")
 
 
 # =============================================================================
@@ -138,65 +174,8 @@ async def query_knowledge_base(
             top_k=request.top_k,
         )
 
-        # 处理不同类型的返回结果
-        if isinstance(result, str):
-            # 纯字符串结果
-            return QueryResult(
-                results=[QueryResultItem(content=result, source="lightrag", score=1.0)] if result else [],
-                total=1 if result else 0,
-                status="success",
-            )
-        elif isinstance(result, dict):
-            # LightRAG 返回字典格式 {"status": "success", "data": {...}}
-            data = result.get("data", {}) or {}
-            items = []
-
-            # 提取 chunks 内容
-            chunks = data.get("chunks", [])
-            for chunk in chunks:
-                if isinstance(chunk, dict):
-                    items.append(
-                        QueryResultItem(
-                            content=chunk.get("content", ""),
-                            source=chunk.get("file_path", chunk.get("source", "")),
-                            score=chunk.get("score", 0.0),
-                        )
-                    )
-                elif isinstance(chunk, str):
-                    items.append(QueryResultItem(content=chunk, source="lightrag", score=1.0))
-
-            # 如果没有 chunks，尝试从 entities 构建摘要
-            if not items:
-                entities = data.get("entities", [])
-
-                # 构建实体摘要
-                for entity in entities[:5]:  # 限制数量
-                    if isinstance(entity, dict):
-                        name = entity.get("entity_name", "")
-                        desc = entity.get("description", "")
-                        if name and desc:
-                            items.append(
-                                QueryResultItem(
-                                    content=f"[{name}] {desc}",
-                                    source=entity.get("file_path", "graph"),
-                                    score=1.0,
-                                )
-                            )
-
-            return QueryResult(results=items, total=len(items), status="success")
-        elif isinstance(result, list):
-            # Milvus 返回列表
-            items = [
-                QueryResultItem(
-                    content=item.get("content", ""),
-                    source=item.get("source", ""),
-                    score=item.get("distance", item.get("score", 0.0)),
-                )
-                for item in result
-            ]
-            return QueryResult(results=items, total=len(items), status="success")
-        else:
-            return QueryResult(results=[], total=0, status="success")
+        items = _parse_query_result(result)
+        return QueryResult(results=items, total=len(items), status="success")
 
     except HTTPException:
         raise
@@ -205,4 +184,111 @@ async def query_knowledge_base(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"知识库查询失败: {str(e)}",
+        )
+
+
+# =============================================================================
+# === Dify 外部知识库兼容接口 ===
+# =============================================================================
+
+
+def _parse_query_result(result: Any) -> list[QueryResultItem]:
+    """将 knowledge_base.aquery 的返回值解析为统一的 QueryResultItem 列表"""
+    if isinstance(result, str):
+        return [QueryResultItem(content=result, source="lightrag", score=1.0)] if result else []
+    elif isinstance(result, dict):
+        data = result.get("data", {}) or {}
+        items = []
+
+        for chunk in data.get("chunks", []):
+            if isinstance(chunk, dict):
+                items.append(
+                    QueryResultItem(
+                        content=chunk.get("content", ""),
+                        source=chunk.get("file_path", chunk.get("source", "")),
+                        score=chunk.get("score", 0.0),
+                    )
+                )
+            elif isinstance(chunk, str):
+                items.append(QueryResultItem(content=chunk, source="lightrag", score=1.0))
+
+        if not items:
+            for entity in data.get("entities", [])[:5]:
+                if isinstance(entity, dict):
+                    name = entity.get("entity_name", "")
+                    desc = entity.get("description", "")
+                    if name and desc:
+                        items.append(
+                            QueryResultItem(
+                                content=f"[{name}] {desc}",
+                                source=entity.get("file_path", "graph"),
+                                score=1.0,
+                            )
+                        )
+        return items
+    elif isinstance(result, list):
+        return [
+            QueryResultItem(
+                content=item.get("content", ""),
+                source=item.get("source", ""),
+                score=item.get("distance", item.get("score", 0.0)),
+            )
+            for item in result
+        ]
+    return []
+
+
+@open_api.post("/retrieval", response_model=DifyRetrievalResponse)
+async def dify_retrieval(
+    request: DifyRetrievalRequest,
+    api_key: APIKey = Depends(require_scopes("knowledge:read")),
+):
+    """Dify 外部知识库兼容接口
+
+    遵循 Dify External Knowledge API 规范，使第三方平台可以通过标准接口检索本系统的知识库。
+
+    请求体:
+        knowledge_id: 知识库ID
+        query: 查询文本
+        retrieval_setting: 检索设置（top_k, score_threshold）
+    """
+    db_id = request.knowledge_id
+    try:
+        db_info = await knowledge_base.get_database_info(db_id)
+        if db_info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Knowledge base not found",
+            )
+
+        result = await knowledge_base.aquery(
+            request.query,
+            db_id=db_id,
+            top_k=request.retrieval_setting.top_k,
+        )
+
+        items = _parse_query_result(result)
+
+        # 按 score_threshold 过滤并转换为 Dify 格式
+        score_threshold = request.retrieval_setting.score_threshold
+        records = [
+            DifyRecord(
+                content=item.content,
+                score=item.score,
+                title=item.source,
+                metadata={"source": item.source},
+            )
+            for item in items
+            if item.score >= score_threshold
+        ]
+
+        return DifyRetrievalResponse(records=records)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[OpenAPI] Dify 知识库检索失败 (knowledge_id={db_id}): {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"知识库检索失败: {str(e)}",
         )
