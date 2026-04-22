@@ -51,9 +51,12 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useUserStore } from '@/stores/user'
 import BaseToolCall from '../BaseToolCall.vue'
 import MediaResultCard from '../MediaResultCard.vue'
 import MediaPlayer from '@/components/MediaPlayer.vue'
+
+const userStore = useUserStore()
 
 const props = defineProps({
   toolCall: {
@@ -94,8 +97,13 @@ function parsedResults(content) {
 }
 
 function openPlayer(result) {
+  // 优先通过本地代理播放，避免外部 URL 403
+  let url = result.media_url
+  if (result.file_id && result.db_id) {
+    url = `/api/knowledge/databases/${result.db_id}/documents/${result.file_id}/stream?token=${userStore.token}`
+  }
   currentMedia.value = {
-    media_url: result.media_url,
+    media_url: url,
     media_type: result.media_type || 'video',
     start_time: Number(result.start_time) || 0,
     end_time: result.end_time != null ? Number(result.end_time) : undefined,

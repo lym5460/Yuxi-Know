@@ -82,11 +82,12 @@ watch(() => [props.open, props.videoNo], async ([open, videoNo]) => {
     const data = await mediaApi.getMediaDetails(props.dbId, videoNo)
     details.value = data
 
-    if (data.video_url) {
-      mediaUrl.value = data.video_url
-    } else if (data.file_id || props.fileId) {
+    if (data.file_id || props.fileId) {
+      // 优先通过本地代理播放，避免外部 URL 403
       const fid = data.file_id || props.fileId
       mediaUrl.value = `/api/knowledge/databases/${props.dbId}/documents/${fid}/stream?token=${userStore.token}`
+    } else if (data.video_url) {
+      mediaUrl.value = data.video_url
     } else {
       errorMsg.value = '无法获取播放地址'
     }

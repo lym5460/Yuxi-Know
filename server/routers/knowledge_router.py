@@ -1469,13 +1469,13 @@ async def get_media_details(db_id: str, video_no: str, current_user: User = Depe
         result = await memeries_service.get_video_details(video_no=video_no, unique_id=db_id)
         data = result.get("data", result)
 
-        # 从知识库 files_meta 中查找对应的 file_id，用于流式播放
-        if not data.get("video_url"):
-            kb_instance = knowledge_base._get_or_create_kb_instance("memeries")
-            for fid, fmeta in kb_instance.files_meta.items():
-                if fmeta.get("memeries_video_no") == video_no:
-                    data["file_id"] = fid
-                    break
+        # 始终查找 file_id，优先通过本地 /stream 代理播放
+        # Memeries 返回的 video_url 是外部私有地址，浏览器直接访问会 403
+        kb_instance = knowledge_base._get_or_create_kb_instance("memeries")
+        for fid, fmeta in kb_instance.files_meta.items():
+            if fmeta.get("memeries_video_no") == video_no:
+                data["file_id"] = fid
+                break
 
         return data
     except Exception as e:

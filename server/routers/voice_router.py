@@ -372,8 +372,15 @@ async def voice_websocket(
                         })
                         # 不做 RAG 检索，让豆包自由回答
                     elif knowledges and current_asr_text:
-                        # 如果配置了知识库且有 ASR 文本，执行 RAG 检索
-                        rag_sent = await do_rag_retrieval(doubao_client, knowledges, current_asr_text)
+                        # 如果配置了知识库且有 ASR 文本，执行 RAG 检索（超时 8 秒，避免 embedding 故障阻塞语音）
+                        try:
+                            rag_sent = await asyncio.wait_for(
+                                do_rag_retrieval(doubao_client, knowledges, current_asr_text),
+                                timeout=8.0,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(f"RAG 检索超时（8s），跳过知识库检索，让豆包自由回答")
+                            rag_sent = False
                         if rag_sent:
                             # RAG 已发送，暂停 CHAT_RESPONSE 文本（default 阶段的文本不显示）
                             rag_chat_enabled = False

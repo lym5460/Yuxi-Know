@@ -83,10 +83,11 @@ async function loadVideoForPlay(videoNo) {
     const data = await mediaApi.getMediaDetails(selectedDbId.value, videoNo)
     currentVideoInfo.value = data
     currentVideoNo.value = videoNo
-    if (data.video_url) {
-      currentVideoUrl.value = data.video_url
-    } else if (data.file_id) {
+    if (data.file_id) {
+      // 优先通过本地代理播放，避免外部 URL 403
       currentVideoUrl.value = `/api/knowledge/databases/${selectedDbId.value}/documents/${data.file_id}/stream?token=${userStore.token}`
+    } else if (data.video_url) {
+      currentVideoUrl.value = data.video_url
     } else {
       currentVideoUrl.value = ''
     }
